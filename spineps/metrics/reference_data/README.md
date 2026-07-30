@@ -41,3 +41,25 @@ Derived from the SPIDER dataset, used under CC BY 4.0:
 > dataset and a public benchmark. *Scientific Data* 11, 264 (2024). https://doi.org/10.1038/s41597-024-03090-w
 
 Dataset: https://zenodo.org/records/8009680
+
+### Scale: SPINEPS output is wider than these numbers
+
+These percentiles come from **human** canal annotations. SPINEPS' canal label is systematically wider.
+Measured on 40 SPIDER studies with identical level bands so that only the canal source differed:
+
+| | value |
+|---|---|
+| Paired levels | 278 |
+| Bias (SPINEPS − reference) | **+1.20 mm** |
+| Mean absolute difference | 1.32 mm |
+| Correlation | r = +0.913 |
+| Per-level bias range | +0.64 to +1.59 mm, no caudal-cranial drift |
+
+Comparing a raw SPINEPS measurement against this table would therefore make every level look about a
+millimetre roomier than it is — a systematic bias towards *missing* narrowing. `percentile_rank()` and
+`is_unusually_narrow()` default to `source="spineps"` and subtract `SPINEPS_CANAL_OFFSET_MM` for you; pass
+`source="reference"` if you measured on a human annotation.
+
+**The agreement above is optimistic.** SPINEPS was trained on 179 of SPIDER's 218 subjects, and this
+comparison did not exclude them, so r = +0.913 reflects partly-seen data. The 1.20 mm offset should be
+re-estimated on a dataset SPINEPS has never seen before it is relied on.

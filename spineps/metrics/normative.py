@@ -21,6 +21,18 @@ from typing import Optional
 
 REFERENCE_FILE = Path(__file__).with_name("reference_data") / "spider_normative_canal.tsv"
 
+#: Offset to subtract from a SPINEPS-derived diameter before comparing it to the bundled distribution.
+#:
+#: The bundled reference was measured on *human* canal annotations. SPINEPS' canal label is systematically
+#: wider: over 278 paired levels from 40 studies, measured with identical level bands so only the canal
+#: source differed, SPINEPS read +1.20 mm larger on average (mean absolute difference 1.32 mm, r = +0.913).
+#: The offset is near-constant across levels (+0.64 to +1.59 mm) with no caudal-cranial drift, which is what
+#: makes a single correction defensible.
+#:
+#: Comparing an uncorrected SPINEPS measurement against the human-derived distribution would make every
+#: level look roughly a millimetre roomier than it is -- a systematic bias towards missing narrowing.
+SPINEPS_CANAL_OFFSET_MM = 1.20
+
 #: Percentile columns available in the reference table, in order.
 PERCENTILES = (5, 25, 50, 75, 95)
 
@@ -67,10 +79,32 @@ def load_reference() -> dict[tuple[int, str], LevelReference]:
     return table
 
 
+def calibrate(diameter_mm: float, source: str) -> float:
+    """Puts a measurement on the same scale as the bundled reference distribution.
+
+    Args:
+        diameter_mm (float): Measured AP diameter.
+        source (str): "spineps" for a diameter measured on SPINEPS output, or "reference" for one measured
+            on a human annotation (no correction).
+
+    Returns:
+        float: The diameter on the reference scale.
+
+    Raises:
+        ValueError: If ``source`` is not one of the supported values.
+    """
+    if source == "reference":
+        return diameter_mm
+    if source == "spineps":
+        return diameter_mm - SPINEPS_CANAL_OFFSET_MM
+    raise ValueError(f"source must be 'spineps' or 'reference', got {source!r}")
+
+
 def percentile_rank(
     diameter_mm: float,
     level_index: int,
     structure: str = "vertebra",
+    source: str = "spineps",
 ) -> Optional[str]:
     """Places a measured diameter within its level's reference distribution.
 
@@ -78,6 +112,8 @@ def percentile_rank(
         diameter_mm (float): Measured AP diameter.
         level_index (int): Level index, 1 = most caudal.
         structure (str, optional): "vertebra" or "disc". Defaults to "vertebra".
+        source (str, optional): Where the measurement came from, so it can be put on the reference scale.
+            Defaults to "spineps", since that is what this package produces.
 
     Returns:
         str | None: A coarse band such as "<p5", "p25-p50" or ">p95", or None if the reference has no row
@@ -87,6 +123,7 @@ def percentile_rank(
     row = load_reference().get((int(level_index), structure))
     if row is None:
         return None
+    diameter_mm = calibrate(diameter_mm, source)
     ordered = sorted(row.values.items())
     if diameter_mm < ordered[0][1]:
         return f"<p{ordered[0][0]}"
@@ -96,7 +133,12 @@ def percentile_rank(
     return f">p{ordered[-1][0]}"
 
 
-def is_unusually_narrow(diameter_mm: float, level_index: int, structure: str = "vertebra") -> Optional[bool]:
+def is_unusually_narrow(
+    diameter_mm: float,
+    level_index: int,
+    structure: str = "vertebra",
+    source: str = "spineps",
+) -> Optional[bool]:
     """Whether a diameter falls below the 5th percentile for its level.
 
     This is a statement about how uncommon the measurement is in the reference cohort, not a diagnosis. The
@@ -106,9 +148,10 @@ def is_unusually_narrow(diameter_mm: float, level_index: int, structure: str = "
         diameter_mm (float): Measured AP diameter.
         level_index (int): Level index, 1 = most caudal.
         structure (str, optional): "vertebra" or "disc". Defaults to "vertebra".
+        source (str, optional): Where the measurement came from. Defaults to "spineps".
 
     Returns:
         bool | None: True if below p5, or None if the level is not in the reference.
     """
     row = load_reference().get((int(level_index), structure))
-    return None if row is None else diameter_mm < row.values[5]
+    return None if row is None else calibrate(diameter_mm, source) < row.values[5]
