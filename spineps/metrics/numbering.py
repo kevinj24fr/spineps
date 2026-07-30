@@ -137,32 +137,35 @@ def assess_numbering(vert_nii: NII) -> NumberingConfidence:
             # L6 sits below the lumbar spine, so it renumbers everything above it; T13 does not.
             result.transitional_shifts_lumbar = name == "L6"
             shift_note = (
-                "every lumbar level below it is renumbered" if result.transitional_shifts_lumbar
-                else "lumbar numbering is unaffected"
+                "every lumbar level below it is renumbered" if result.transitional_shifts_lumbar else "lumbar numbering is unaffected"
             )
             result.reasons.append(f"transitional vertebra {name} was assigned, so {shift_note}")
             result.trustworthy = False
 
-    if not result.sacrum_visible:
-        result.reasons.append(
-            "no sacrum was segmented, so the count is not anchored from below and a whole-spine "
-            "off-by-one cannot be ruled out"
-        )
-        result.trustworthy = False
-
-    # Truncation: does the segmentation run into either end of the acquired volume?
+    # Truncation is recorded for context but is deliberately not on its own a reason to distrust the
+    # numbering. On a real cohort the segmentation reached a volume edge in 16 of 18 stations: in spine MRI
+    # the column almost always continues past the field of view, so treating that as a warning would fire
+    # on nearly every scan and mean nothing. What matters is whether the count is *anchored*.
     occupied_is = np.flatnonzero((arr > 0).any(axis=(0, 1)))
     if occupied_is.size:
-        if occupied_is[-1] >= arr.shape[2] - 1 - EDGE_TOLERANCE_VOXELS:
-            result.truncated_superior = True
-            result.reasons.append("segmentation reaches the superior edge of the volume; levels may be cut off above")
-            result.trustworthy = False
-        if occupied_is[0] <= EDGE_TOLERANCE_VOXELS:
-            result.truncated_inferior = True
-            result.reasons.append("segmentation reaches the inferior edge of the volume; levels may be cut off below")
-            result.trustworthy = False
+        result.truncated_superior = bool(occupied_is[-1] >= arr.shape[2] - 1 - EDGE_TOLERANCE_VOXELS)
+        result.truncated_inferior = bool(occupied_is[0] <= EDGE_TOLERANCE_VOXELS)
     else:
         result.reasons.append("no vertebra instances found")
+        result.trustworthy = False
+        return result
+
+    if not result.sacrum_visible:
+        # Without the sacrum the count has no fixed end to work back from, and a truncated field of view
+        # means the missing anchor cannot be recovered by inspection either.
+        detail = (
+            " and the field of view is truncated, so the missing anchor cannot be checked by eye"
+            if (result.truncated_superior or result.truncated_inferior)
+            else ""
+        )
+        result.reasons.append(
+            f"no sacrum was segmented, so the count is not anchored from below{detail}; a whole-spine off-by-one cannot be ruled out"
+        )
         result.trustworthy = False
 
     return result
