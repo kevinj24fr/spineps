@@ -4,6 +4,38 @@
 
 This is a segmentation pipeline to automatically, and robustly, segment the whole spine in T2w sagittal images.
 
+> ## About this fork
+>
+> This is a fork of **[Hendrik-code/spineps](https://github.com/Hendrik-code/spineps)** whose purpose is to
+> make SPINEPS run on machines without an NVIDIA GPU: Apple Silicon through Metal (MPS), and CPU-only hosts.
+>
+> **The method, the trained models, and the research behind them are entirely upstream's work.** This fork
+> changes no methodology, no network architecture, and no model weights — it fixes platform support and
+> bugs. If you use it, **cite the original papers** ([Citation](#citation)); there is nothing here to cite.
+>
+> - What is different, and what it costs you: **[Changes in this fork](#changes-in-this-fork)**
+> - Numerical agreement between backends: **[How closely does Metal agree with the CPU?](#how-closely-does-metal-agree-with-the-cpu)**
+> - For the canonical, CUDA-targeted version, use [upstream](https://github.com/Hendrik-code/spineps).
+>
+> Bugs in the fork-specific behaviour belong in [this fork's issues](https://github.com/kevinj24fr/spineps/issues).
+> Anything about the segmentation itself is an upstream matter.
+
+## Changes in this fork
+
+| Area | Change |
+|---|---|
+| **Runs without CUDA** | Upstream's nnU-Net phases call `torch.cuda.mem_get_info()` unconditionally, so on a machine with no CUDA they abort with `ValueError: Expected a cuda device` — `-cpu` included, leaving no working fallback. Those queries are now device-aware. |
+| **Metal (MPS) support** | Every device decision went through `cuda if torch.cuda.is_available() else cpu`, so Apple GPUs were never used. A single tested policy (`spineps/utils/device.py`) now resolves the backend, exposed as `-device {auto,cpu,cuda,mps}`. |
+| **Named backends fail loudly** | Asking for a backend that is unavailable raises instead of quietly running elsewhere, because the backends do not produce identical masks. Only `auto` falls back, and it logs its choice. |
+| **`-cpu` actually applies** | The vertebra-labeling classifier ignored `use_cpu` entirely and used the GPU regardless. |
+| **Device recorded in output** | Each model entry in `*_ctd.json` now carries the device it ran on, so a mask's provenance includes where it was computed. |
+| **`spineps sample --help`** | Crashed with an `AssertionError` from argparse at every terminal width. Fixed. |
+| **SciPy 2.0 readiness** | The labeling phase imported from `scipy.ndimage.interpolation`, a namespace scheduled for removal. |
+| **Honest dependency metadata** | `torch` was never declared, though Metal depends on it: before 2.3, `mps.is_available()` returns `True` and then `Conv3D` raises. Now pinned `>=2.3`. The Python range claimed up to 3.14 while the pinned `antspyx` caps at 3.12. |
+| **Housekeeping** | Removed 1,479 lines of unreachable vendored nnU-Net code; `ruff check` and all pre-commit hooks now pass; CI tests macOS as well as Linux and Windows. |
+
+Everything else — models, labels, pipeline structure, CLI semantics — is upstream's and unchanged.
+
 ## NOW SUPPORTS BOTH CT AND T2W!
 There is a new release that finally supports both CT and T2W with completely independent, modality specific models. We are already working on completely modality/sequence robust version that works on everything. Stay tuned for that.
 
@@ -25,6 +57,9 @@ mkdocs serve   # then open http://127.0.0.1:8000
 Start with [`docs/index.md`](docs/index.md) and the [Getting Started](docs/getting-started.md) guide.
 
 ## Citation
+
+Cite these whether you use upstream or this fork. The fork contributes no method and no models, so it adds
+nothing to cite and should not displace the original work.
 
 If you are using SPINEPS, please cite the following:
 
@@ -112,11 +147,7 @@ This should throw no errors and return True
 
 ## Installation (macOS / Apple Silicon)
 
-**This fork runs without an NVIDIA GPU.** Upstream SPINEPS requires CUDA in practice: its nnU-Net phases
-query CUDA memory unconditionally, so on a machine without CUDA they abort with
-`ValueError: Expected a cuda device, but got: mps` — and passing `-cpu` hits the same error, so there is no
-working fallback. This fork makes those queries device-aware, adds a single tested device policy across all
-three model types, and so runs on Apple Silicon and on CPU-only hosts.
+> Fork-specific. Upstream does not run without CUDA — see [Changes in this fork](#changes-in-this-fork).
 
 ### How closely does Metal agree with the CPU?
 
