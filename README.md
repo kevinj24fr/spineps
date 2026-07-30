@@ -1,12 +1,3 @@
-[![arXiv](https://img.shields.io/badge/Paper-10.1007-blue)](https://link.springer.com/article/10.1007/s00330-024-11155-y)
-[![Python Versions](https://img.shields.io/pypi/pyversions/spineps)](https://pypi.org/project/spineps/)
-[![PyPI version spineps](https://badge.fury.io/py/spineps.svg)](https://pypi.python.org/pypi/spineps/)
-[![Stable Version](https://img.shields.io/pypi/v/spineps?label=stable)](https://pypi.python.org/pypi/spineps/)
-[![codecov](https://codecov.io/gh/Hendrik-code/spineps/graph/badge.svg?token=A7FWUKO9Y4)](https://codecov.io/gh/Hendrik-code/spineps)
-[![tests](https://github.com/Hendrik-code/spineps/actions/workflows/tests.yml/badge.svg)](https://github.com/Hendrik-code/spineps/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Documentation Status](https://readthedocs.org/projects/spineps/badge/?version=latest)](https://spineps.readthedocs.io)
-
 # SPINEPS – Automatic Whole Spine Segmentation of T2w MR images using a Two-Phase Approach to Multi-class Semantic and Instance Segmentation.
 # and
 # VERIDAH: Solving Enumeration Anomaly Aware Vertebra Labeling across Imaging Sequences
