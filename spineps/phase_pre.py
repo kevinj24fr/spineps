@@ -36,7 +36,13 @@ def _has_logger_arg(func) -> bool:
 
 
 def compute_crop(
-    nii: NII, out_file: str | Path, dataset_id=100, ddevice: Literal["cpu", "cuda", "mps"] = "cuda", gpu=0, max_folds=None, logger=None
+    nii: NII,
+    out_file: str | Path,
+    dataset_id=100,
+    ddevice: Literal["auto", "cpu", "cuda", "mps"] = "auto",
+    gpu=0,
+    max_folds=None,
+    logger=None,
 ) -> tuple[slice, slice, slice]:
     """Run the Vibe whole-body segmentation and compute a crop region around the spine.
 
@@ -47,7 +53,8 @@ def compute_crop(
         nii (NII): Input MRI image to segment and crop.
         out_file: Path where the Vibe segmentation output is written.
         dataset_id (int, optional): Vibe model/dataset identifier passed to ``run_vibeseg``. Defaults to 100.
-        ddevice (Literal["cpu", "cuda", "mps"], optional): Compute device for inference. Defaults to "cuda".
+        ddevice (Literal["auto", "cpu", "cuda", "mps"], optional): Compute device for inference. "auto"
+            resolves to the best backend available. Defaults to "auto".
         gpu (int, optional): GPU index used when running on CUDA. Defaults to 0.
         max_folds (int | None, optional): Maximum number of model folds to ensemble. Defaults to None (all folds).
         logger (optional): Logger forwarded to ``run_vibeseg`` when that version supports it. Defaults to None.
@@ -58,10 +65,14 @@ def compute_crop(
     from TPTBox.core.vert_constants import Full_Body_Instance_Vibe
     from TPTBox.segmentation import run_vibeseg
 
+    from spineps.utils.device import device_to_ddevice, resolve_device
     from spineps.utils.tptbox_compat import patch_nnunet_gpu_memory_helpers
 
     # TPTBox queries CUDA memory unconditionally; make that work on Metal/CPU too.
     patch_nnunet_gpu_memory_helpers()
+    # Route through the same policy as every other call site, so "auto" means the same thing everywhere
+    # and a named backend that is unavailable fails here too instead of silently changing.
+    ddevice = device_to_ddevice(resolve_device(ddevice, logger=logger))
 
     if _has_logger_arg(run_vibeseg):
         out = run_vibeseg(nii, out_file, dataset_id=dataset_id, ddevice=ddevice, gpu=gpu, max_folds=max_folds, logger=logger)
