@@ -96,6 +96,13 @@ DEFAULT_MIN_AP_EXTENT_MM = 2.0
 #: sensitivity, so it is the default.
 DEFAULT_NARROW_PERCENTILE = 10.0
 
+#: Range an adult spinal canal AP diameter can plausibly fall in. Values outside it are reported anyway --
+#: this is a measurement tool, not a filter -- but they trigger a warning, because in practice the cause is
+#: almost never anatomy. Feeding in a mask whose affine was rebuilt from voxel spacing alone silently
+#: relabels the axes, and on a sagittal study that measures "anterior-posterior" along the left-right axis;
+#: this guard was added after exactly that mistake produced 90 mm "diameters" that nothing objected to.
+PLAUSIBLE_AP_DIAMETER_MM = (2.0, 30.0)
+
 
 @dataclass
 class CanalLevelMetrics:
@@ -260,6 +267,33 @@ def _bands_from_mask(labelled: np.ndarray) -> dict[int, tuple[int, int]]:
     return bands
 
 
+def _warn_if_implausible(result: CanalMeasurement, log) -> None:
+    """Warns when the measured diameters are outside anatomical possibility.
+
+    A wrong-geometry input does not fail, it produces confident nonsense, so the only thing that catches it
+    is noticing the numbers cannot be real. The usual cause is an affine that does not describe the array's
+    axes, which makes the anterior-posterior measurement run along the wrong axis.
+
+    Args:
+        result (CanalMeasurement): Measurement to check and annotate in place.
+        log: Logger for surfacing the warning.
+    """
+    lo, hi = PLAUSIBLE_AP_DIAMETER_MM
+    diameters = [lvl.median_ap_diameter_mm for lvl in result.levels]
+    typical = float(np.median(diameters))
+    offenders = [lvl.level_name for lvl in result.levels if not lo <= lvl.median_ap_diameter_mm <= hi]
+    if not offenders:
+        return
+    message = (
+        f"{len(offenders)} of {len(result.levels)} levels have an AP diameter outside the plausible "
+        f"{lo:.0f}-{hi:.0f} mm range (median across levels {typical:.1f} mm; {', '.join(offenders[:6])}). "
+        "The usual cause is input geometry, not anatomy: check that the mask's affine really describes its "
+        "array axes, since an affine rebuilt from voxel spacing alone measures AP along the wrong axis."
+    )
+    result.warnings.append(message)
+    log.print(message, Log_Type.WARNING)
+
+
 def measure_canal(
     semantic_nii: NII,
     vert_nii: NII,
@@ -386,5 +420,7 @@ def measure_canal(
     if not result.levels:
         result.warnings.append("no level had enough canal voxels to measure")
         log.print("No canal levels could be measured", Log_Type.WARNING)
+    else:
+        _warn_if_implausible(result, log)
 
     return result

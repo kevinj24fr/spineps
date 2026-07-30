@@ -9,14 +9,19 @@ reader, not as findings.
 """
 
 from spineps.metrics.canal import CanalLevelMetrics, measure_canal
+from spineps.metrics.normative import LevelReference, is_unusually_narrow, load_reference, percentile_rank
 from spineps.metrics.numbering import NumberingConfidence, assess_numbering
 from spineps.metrics.soft_tissue import SoftTissueVolumes, measure_soft_tissue
 
 __all__ = [
     "CanalLevelMetrics",
+    "LevelReference",
     "NumberingConfidence",
     "SoftTissueVolumes",
     "assess_numbering",
+    "is_unusually_narrow",
+    "load_reference",
     "measure_canal",
     "measure_soft_tissue",
+    "percentile_rank",
 ]
