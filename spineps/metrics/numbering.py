@@ -22,17 +22,32 @@ count from below, whether the field of view is truncated at either end, and whet
 was called and where. They do not re-run the labelling solver, so they are not a posterior probability --
 a numbering with no flags raised can still be wrong. Absence of flags is weaker evidence than presence.
 
-Flagging does not improve a per-level endpoint
-----------------------------------------------
-Measured on 281 RSNA studies, scoring canal AP diameter at L4/L5 against the radiologist's stenosis grade:
-clean numbering gave AUC 0.924, a called transitional level gave 0.896, confidence intervals almost
-entirely overlapping.
+What the flags catch, measured
+------------------------------
+Checked against radiologist-placed level annotations on 300 RSNA studies (1,483 annotated points), 13.0% of
+studies had their level naming mostly wrong, and the errors were whole-study shifts of exactly one level
+rather than scattered per-level confusion.
 
-These flags are therefore **not** a filter that improves discrimination. A shifted level assignment still
-lands on an adjacent disc, whose pathology correlates with the intended one. Their use is provenance and
-level *identity*: a row labelled "L4/L5" that is really L3/L4 matters when results are aggregated per level
-across a cohort, or checked against a report that names levels. It matters much less when the question is
-whether one particular disc is narrow.
+The risk is concentrated in a single call:
+
+=================  ==========  =========  =====================
+transitional call  mis-named   correct    error rate
+=================  ==========  =========  =====================
+none               10          204        4.7%
+T13                2           43         4.4%
+L6                 27          14         **65.9%**
+=================  ==========  =========  =====================
+
+So ``trustworthy`` is set False for an L6 call and not for a T13 call, which carries no more risk than
+making no call at all. Both are still reported in ``transitional_called``.
+
+Two limits worth knowing. Ten mis-named studies had no transitional call and are not caught at all; nine of
+those ten had *every* level wrong rather than a borderline shift, so they are gross misregistrations that a
+confidence flag on the labelling decision cannot see. And these flags do not improve a downstream per-level
+endpoint: scoring canal AP diameter at L4/L5 against the stenosis grade gave AUC 0.924 for clean numbering
+against 0.896 for flagged, confidence intervals overlapping, because a shifted level still lands on an
+adjacent disc whose pathology correlates with the intended one. The flags are for level *identity* --
+which matters when aggregating per level across a cohort, or checking against a report that names levels.
 """
 
 from __future__ import annotations
@@ -142,17 +157,28 @@ def assess_numbering(vert_nii: NII) -> NumberingConfidence:
     )
     labels = vertebra_labels
 
-    # A transitional level means the count rested on a judgement call.
+    # A transitional level is recorded whenever it is assigned, but only an L6 call condemns the numbering.
+    # Measured against radiologist level annotations on 300 studies: a study given an L6 was mis-named 65.9%
+    # of the time, while a study given a T13 was mis-named 4.4% of the time -- indistinguishable from the
+    # 4.7% rate among studies with no transitional call at all. Treating both alike flagged 43 harmless T13
+    # studies and held precision at 33.7%.
     for label, name in TRANSITIONAL_LABELS.items():
         if label in labels:
             result.transitional_called = name
             # L6 sits below the lumbar spine, so it renumbers everything above it; T13 does not.
             result.transitional_shifts_lumbar = name == "L6"
-            shift_note = (
-                "every lumbar level below it is renumbered" if result.transitional_shifts_lumbar else "lumbar numbering is unaffected"
-            )
-            result.reasons.append(f"transitional vertebra {name} was assigned, so {shift_note}")
-            result.trustworthy = False
+            if result.transitional_shifts_lumbar:
+                result.reasons.append(
+                    f"transitional vertebra {name} was assigned, which renumbers every lumbar level below "
+                    "it; two thirds of studies given an L6 disagree with radiologist level annotations"
+                )
+                result.trustworthy = False
+            else:
+                result.reasons.append(
+                    f"transitional vertebra {name} was assigned; lumbar numbering is unaffected and the "
+                    "observed error rate matches studies with no transitional call, so this is recorded "
+                    "rather than treated as a warning"
+                )
 
     # Truncation is recorded for context but is deliberately not on its own a reason to distrust the
     # numbering. On a real cohort the segmentation reached a volume edge in 16 of 18 stations: in spine MRI

@@ -183,20 +183,29 @@ class Test_Numbering_Confidence(unittest.TestCase):
         self.assertFalse(result.sacrum_visible)
         self.assertTrue(any("sacrum" in r for r in result.reasons))
 
-    def test_t13_is_flagged_but_does_not_shift_lumbar(self):
+    def test_t13_is_recorded_but_does_not_condemn_the_numbering(self):
+        """A T13 call carries a 4.4% mis-naming rate, matching studies with no transitional call at all."""
         result = assess_numbering(self._verts(["T13", "L4", "L5", "S1"]))
         self.assertEqual(result.transitional_called, "T13")
         self.assertFalse(result.transitional_shifts_lumbar)
-        self.assertFalse(result.trustworthy)
+        self.assertTrue(result.trustworthy, result.reasons)
         self.assertTrue(any("unaffected" in r for r in result.reasons))
 
     def test_l6_is_flagged_as_shifting_lumbar_numbering(self):
-        """This is the consequential case: every lumbar level below is renumbered."""
+        """The consequential case: two thirds of L6 studies disagree with radiologist level annotations."""
         result = assess_numbering(self._verts(["L4", "L5", "L6", "S1"]))
         self.assertEqual(result.transitional_called, "L6")
         self.assertTrue(result.transitional_shifts_lumbar)
         self.assertFalse(result.trustworthy)
-        self.assertTrue(any("renumbered" in r for r in result.reasons))
+        self.assertTrue(any("renumbers" in r for r in result.reasons))
+
+    def test_only_l6_condemns_among_transitional_calls(self):
+        """Flagging T13 alongside L6 held precision at 33.7% by flagging 43 harmless studies."""
+        t13 = assess_numbering(self._verts(["T13", "L4", "L5", "S1"]))
+        l6 = assess_numbering(self._verts(["L4", "L5", "L6", "S1"]))
+        self.assertTrue(t13.trustworthy)
+        self.assertFalse(l6.trustworthy)
+        self.assertTrue(t13.transitional_called and l6.transitional_called)
 
     def test_truncation_at_each_end_is_detected(self):
         top = assess_numbering(self._verts(["L4", "L5", "S1"], touch_top=True))
