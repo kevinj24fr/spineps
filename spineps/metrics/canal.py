@@ -21,24 +21,33 @@ under-measured. Published AP-diameter thresholds for stenosis exist, but they de
 measurement convention -- check them against current literature for your protocol rather than assuming the
 numbers here are directly comparable.
 
-Use the median, not the minimum
--------------------------------
-Measured over 147 levels of a real cohort segmented on two different compute backends, the statistics are
-not equally trustworthy:
+Which number to use
+-------------------
+Measured over 150 levels of a real cohort segmented on two different compute backends:
 
-===============  ==================  =================
-statistic        mean abs difference  worst difference
-===============  ==================  =================
-mean_ap          0.13 mm             1.00 mm
-median_ap        0.18 mm             1.21 mm
-min_ap           0.33 mm             **13.56 mm**
-===============  ==================  =================
+=====================  ==================  =================
+statistic              mean abs difference  worst difference
+=====================  ==================  =================
+mean_ap                0.11 mm             0.45 mm
+median_ap              0.14 mm             1.21 mm
+narrow_ap (10th pct)   0.17 mm             1.68 mm
+min_ap (raw minimum)   0.25 mm             2.73 mm
+=====================  ==================  =================
 
-``min_ap_diameter_mm`` is reported because it is the intuitive thing to ask for, but it is the least
-reliable number here and should not be used as an endpoint on its own. Two reasons: a single-slice outlier
-sets it, and at the caudal end the canal genuinely tapers, so on this cohort the "narrowest level" was S1
-in most subjects -- anatomy, not stenosis. Prefer ``median_ap_diameter_mm``, and look at a mobile level you
-chose deliberately rather than at whichever level happened to score lowest.
+**Use ``narrow_ap_diameter_mm``** when asking how narrow a level is. It is a low percentile of the level's
+AP diameters rather than the single narrowest row, which keeps the meaning while not being hostage to one
+row of segmentation jitter.
+
+``min_ap_diameter_mm`` is still reported because it is the intuitive thing to ask for, but it is the least
+reproducible number here. An earlier version of this module measured the raw minimum against a single
+mid-sagittal slice chosen from the whole column, and it differed by up to 13.6 mm between backends;
+choosing that slice per level, from each level's own canal, brought the worst case down to 2.7 mm. The
+lesson generalises: on a curved spine a measurement anchored globally does not mean the same thing at
+every level.
+
+One anatomical caveat no statistic fixes: at the caudal end the canal genuinely tapers, so the level with
+the smallest diameter is usually S1 -- anatomy, not stenosis. Choose the levels you compare deliberately
+rather than taking whichever scored lowest.
 """
 
 from __future__ import annotations
@@ -69,6 +78,24 @@ MIN_CANAL_VOXELS_PER_LEVEL = 10
 #: meaning with voxel size, and exposed as a parameter because it is a judgement call, not a constant.
 DEFAULT_MIN_AP_EXTENT_MM = 2.0
 
+#: Percentile used for the robust "narrow end" of a level's AP diameters, chosen by measuring both
+#: reproducibility and sensitivity over 150 levels segmented on two backends:
+#:
+#: ===========  ==================  ==========  =========================
+#: percentile   mean abs difference  worst      median minus narrow
+#: ===========  ==================  ==========  =========================
+#: 0 (raw min)  0.252 mm            2.734 mm    2.106 mm
+#: 5            0.212 mm            2.263 mm    1.829 mm
+#: **10**       **0.170 mm**        1.681 mm    1.555 mm
+#: 25           0.186 mm            0.970 mm    0.826 mm
+#: ===========  ==================  ==========  =========================
+#:
+#: The last column is sensitivity: how far below the level's median the statistic sits, i.e. how much of a
+#: focal narrowing survives. The 25th percentile is the most reproducible but halves that, which defeats the
+#: point of the measure. The 10th gives the lowest mean difference while keeping 74% of the raw minimum's
+#: sensitivity, so it is the default.
+DEFAULT_NARROW_PERCENTILE = 10.0
+
 
 @dataclass
 class CanalLevelMetrics:
@@ -80,7 +107,9 @@ class CanalLevelMetrics:
         is_disc_level (bool): True if this row describes an intervertebral disc level.
         n_slices (int): Number of cranio-caudal slices the level spans.
         min_ap_diameter_mm (float): Narrowest AP canal diameter across the level's slices. Fragile -- see
-            the module docstring; prefer the median.
+            the module docstring; prefer narrow_ap_diameter_mm.
+        narrow_ap_diameter_mm (float): Robust narrow end of the level, the DEFAULT_NARROW_PERCENTILE-th
+            percentile of its AP diameters. This is the number to use when asking how narrow a level is.
         mean_ap_diameter_mm (float): Mean AP canal diameter across the level's slices.
         median_ap_diameter_mm (float): Median AP canal diameter across the level's slices.
         canal_volume_mm3 (float): Canal volume within the level's band.
@@ -93,6 +122,7 @@ class CanalLevelMetrics:
     is_disc_level: bool
     n_slices: int
     min_ap_diameter_mm: float
+    narrow_ap_diameter_mm: float
     mean_ap_diameter_mm: float
     median_ap_diameter_mm: float
     canal_volume_mm3: float
@@ -111,6 +141,7 @@ class CanalLevelMetrics:
             "is_disc_level": self.is_disc_level,
             "n_slices": self.n_slices,
             "min_ap_diameter_mm": round(self.min_ap_diameter_mm, 3),
+            "narrow_ap_diameter_mm": round(self.narrow_ap_diameter_mm, 3),
             "mean_ap_diameter_mm": round(self.mean_ap_diameter_mm, 3),
             "median_ap_diameter_mm": round(self.median_ap_diameter_mm, 3),
             "canal_volume_mm3": round(self.canal_volume_mm3, 3),
@@ -135,16 +166,16 @@ class CanalMeasurement:
     voxel_size_mm: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     def as_rows(self) -> list[dict]:
-        """Returns every level as a dict row, narrowest level first by median AP diameter.
+        """Returns every level as a dict row, narrowest level first by robust narrow diameter.
 
-        Ordering uses the median rather than the minimum: across a real cohort the minimum differed by up
-        to 13.6 mm between compute backends, so ordering by it would reshuffle the table for reasons that
-        have nothing to do with the patient.
+        Ordering uses the robust percentile rather than the raw minimum: across a real cohort the minimum
+        differed by up to 13.6 mm between compute backends, so ordering by it would reshuffle the table for
+        reasons that have nothing to do with the patient.
 
         Returns:
-            list[dict]: Rows ordered by ascending median AP diameter.
+            list[dict]: Rows ordered by ascending narrow AP diameter.
         """
-        return [lvl.as_row() for lvl in sorted(self.levels, key=lambda x: x.median_ap_diameter_mm)]
+        return [lvl.as_row() for lvl in sorted(self.levels, key=lambda x: x.narrow_ap_diameter_mm)]
 
 
 def _ap_diameters_mm(canal_midsagittal: np.ndarray, spacing_pa: float, min_extent_mm: float) -> np.ndarray:
@@ -234,6 +265,7 @@ def measure_canal(
     vert_nii: NII,
     include_disc_levels: bool = True,
     min_ap_extent_mm: float = DEFAULT_MIN_AP_EXTENT_MM,
+    narrow_percentile: float = DEFAULT_NARROW_PERCENTILE,
     logger_=None,
 ) -> CanalMeasurement:
     """Measures spinal canal geometry at every level of a SPINEPS segmentation.
@@ -246,6 +278,8 @@ def measure_canal(
         min_ap_extent_mm (float, optional): Ignore mid-sagittal rows thinner than this when computing
             diameters, so canal taper and stray voxels do not set the reported minimum. Set to 0 to
             measure raw geometry. Defaults to DEFAULT_MIN_AP_EXTENT_MM.
+        narrow_percentile (float, optional): Percentile of a level's AP diameters reported as its robust
+            narrow end. Set to 0 to reproduce the raw minimum. Defaults to DEFAULT_NARROW_PERCENTILE.
         logger_ (optional): Logger for warnings. Defaults to None (module logger).
 
     Returns:
@@ -284,8 +318,6 @@ def measure_canal(
             "slices and a narrowing that is worst off-midline will be under-measured"
         )
 
-    mid_sag = _mid_sagittal_index(canal)
-
     # The instance mask encodes a vertebra, its disc and its endplate as the same index offset by
     # multiples of 100. Split them apart, or every vertebra would be measured three times over bands
     # that overlap each other.
@@ -306,7 +338,10 @@ def measure_canal(
         voxels = int(sub.sum())
         if voxels < MIN_CANAL_VOXELS_PER_LEVEL:
             return None
-        mid_plane = sub[mid_sag] if mid_sag < sub.shape[0] else sub.any(axis=0)
+        # Pick the mid-sagittal slice from this level's own canal, not from the whole column: the spine
+        # curves, so a single global slice clips the canal obliquely at the levels furthest from it.
+        level_mid = _mid_sagittal_index(sub)
+        mid_plane = sub[level_mid] if level_mid < sub.shape[0] else sub.any(axis=0)
         diameters = _ap_diameters_mm(mid_plane, spacing[_AXIS_PA], min_ap_extent_mm)
         if diameters.size == 0:
             return None
@@ -316,6 +351,7 @@ def measure_canal(
             is_disc_level=is_disc,
             n_slices=int(hi - lo + 1),
             min_ap_diameter_mm=float(diameters.min()),
+            narrow_ap_diameter_mm=float(np.percentile(diameters, narrow_percentile)),
             mean_ap_diameter_mm=float(diameters.mean()),
             median_ap_diameter_mm=float(np.median(diameters)),
             canal_volume_mm3=voxels * voxel_volume,
