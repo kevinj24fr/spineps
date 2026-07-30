@@ -134,7 +134,9 @@ def entry_point():
         default=None,
         required=True,
         # choices=modelids_semantic,
-        metavar="",
+        # A required option must not use metavar="": argparse renders it as "-model_semantic " with a
+        # trailing space, which its own usage round-trip assertion then rejects, so -h crashes.
+        metavar="MODEL",
         help="The model used for the semantic segmentation. You can also pass an absolute path the model folder",
     )
     parser_sample.add_argument(
