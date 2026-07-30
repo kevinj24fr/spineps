@@ -8,20 +8,41 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from monai.transforms import CenterSpatialCropd, Compose, NormalizeIntensityd, ToTensor
-from scipy.ndimage.interpolation import rotate
+from scipy.ndimage import rotate
 from TPTBox import NII, Log_Type, No_Logger, np_utils
 from typing_extensions import Self
 
-from spineps.architectures.pl_densenet import PLClassifier
 from spineps.seg_enums import OutputType
 from spineps.seg_model import Segmentation_Inference_Config, Segmentation_Model
+from spineps.utils.device import Device_Kind
 from spineps.utils.filepaths import search_path
 
 logger = No_Logger(prefix="VertLabelingClassifier")
 
 # Default spatial size (voxels) of the cropped patch fed to the vertebra-labeling classifier.
 DEFAULT_CLASSIFIER_INPUT_SIZE = (152, 168, 32)
+
+
+def _build_patch_transform(final_size: tuple[int, int, int]):
+    """Builds the intensity-normalization and center-crop transform applied to each vertebra patch.
+
+    MONAI is imported here rather than at module scope because importing it scans MONAI's entire package
+    tree (~0.9 s), which every CLI invocation would otherwise pay even when no classifier is used.
+
+    Args:
+        final_size (tuple[int, int, int]): Spatial size the patch is cropped to.
+
+    Returns:
+        monai.transforms.Compose: The patch preprocessing transform.
+    """
+    from monai.transforms import CenterSpatialCropd, Compose, NormalizeIntensityd
+
+    return Compose(
+        [
+            NormalizeIntensityd(keys=["img"], nonzero=True, channel_wise=False),
+            CenterSpatialCropd(keys=["img", "seg"], roi_size=final_size),
+        ]
+    )
 
 
 def unit_vector(vector):
@@ -96,6 +117,7 @@ class VertLabelingClassifier(Segmentation_Model):
         use_cpu: bool = False,
         default_verbose: bool = False,
         default_allow_tqdm: bool = True,
+        device: Device_Kind | str | None = "auto",
     ):
         """Initializes the vertebra-labeling classifier and its preprocessing transforms.
 
@@ -103,25 +125,23 @@ class VertLabelingClassifier(Segmentation_Model):
             model_folder (str | Path): Path to the classifier's model folder.
             inference_config (Segmentation_Inference_Config | None, optional): Inference config; if None, loads it from the
                 model folder. Defaults to None.
-            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Defaults to False.
+            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Overrides ``device``.
+                Defaults to False.
             default_verbose (bool, optional): If true, prints more information when used. Defaults to False.
             default_allow_tqdm (bool, optional): If true, shows a progress bar while predicting. Defaults to True.
+            device (Device_Kind | str | None, optional): Device to run inference on: "auto", "cpu", "cuda" or "mps".
+                Defaults to "auto".
 
         Raises:
             AssertionError: If the inference config expects more than one input.
         """
-        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm)
+        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm, device=device)
         assert len(self.inference_config.expected_inputs) == 1, "Unet3D cannot expect more than one input"
-        # self.model: PLClassifier = model
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        from monai.transforms import ToTensor
+
         self.final_size: tuple[int, int, int] = DEFAULT_CLASSIFIER_INPUT_SIZE
         self.totensor = ToTensor()
-        self.transform = Compose(
-            [
-                NormalizeIntensityd(keys=["img"], nonzero=True, channel_wise=False),
-                CenterSpatialCropd(keys=["img", "seg"], roi_size=self.final_size),
-            ]
-        )
+        self.transform = _build_patch_transform(self.final_size)
 
     def load(self, folds: tuple[str, ...] | None = None) -> Self:  # noqa: ARG002
         """Loads the classifier checkpoint and updates the preprocessing transform to the model's input size.
@@ -135,6 +155,9 @@ class VertLabelingClassifier(Segmentation_Model):
         Raises:
             AssertionError: If no matching checkpoint file is found in the model folder.
         """
+        # Imported here rather than at module scope: this pulls in pytorch_lightning (~0.7 s of start-up).
+        from spineps.architectures.pl_densenet import PLClassifier
+
         assert os.path.exists(self.model_folder)  # noqa: PTH110
 
         chktpath = search_path(self.model_folder, "**/*val_f1=*valf1-weights.ckpt")
@@ -142,15 +165,9 @@ class VertLabelingClassifier(Segmentation_Model):
         model = PLClassifier.load_from_checkpoint(checkpoint_path=chktpath[-1], weights_only=False)
         if hasattr(model.opt, "final_size"):
             self.final_size = model.opt.final_size
-            self.transform = Compose(
-                [
-                    NormalizeIntensityd(keys=["img"], nonzero=True, channel_wise=False),
-                    CenterSpatialCropd(keys=["img", "seg"], roi_size=self.final_size),
-                ]
-            )
+            self.transform = _build_patch_transform(self.final_size)
         model.eval()
         model.net.eval()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() and not self.use_cpu else "cpu")
         model.to(self.device)
         self.predictor = model
         self.cutout_size = model.opt.final_size

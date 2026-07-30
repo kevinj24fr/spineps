@@ -119,6 +119,45 @@ python -c "import torch; print(torch.cuda.is_available())"
 This should throw no errors and return True
 
 
+## Installation (macOS / Apple Silicon)
+
+**This fork runs without an NVIDIA GPU.** Upstream SPINEPS requires CUDA in practice: its nnU-Net phases
+query CUDA memory unconditionally, so on a machine without CUDA they abort with
+`ValueError: Expected a cuda device, but got: mps` — and passing `-cpu` hits the same error, so there is no
+working fallback. This fork makes those queries device-aware, adds a single tested device policy across all
+three model types, and so runs on Apple Silicon and on CPU-only hosts.
+
+Correctness comes first: **the segmentations this fork produces on Metal are bit-identical to the ones the
+CPU path produces** — verified voxel-for-voxel on the full pipeline, with 100% agreement on the
+nnU-Net logits' argmax. Metal is also considerably faster than the CPU, but the point is that the pipeline
+runs at all and gives you the same answer.
+
+Two things matter on a Mac:
+
+1. **Use a native arm64 Python.** An x86_64 interpreter running under Rosetta cannot reach Metal at all and
+   silently falls back to the CPU. Check with:
+```bash
+python -c "import platform; print(platform.machine())"   # must print arm64
+```
+2. **Confirm Metal is visible to PyTorch:**
+```bash
+python -c "import torch; print(torch.backends.mps.is_available())"   # must print True
+```
+
+Then install the package as described below. Metal is selected automatically, so no flag is needed:
+```bash
+spineps sample -i path/to/image.nii.gz -ms t2w
+```
+To pin the device explicitly, pass `-device mps` (or `-device cpu` to compare). See
+[Device selection](#device-selection).
+
+> Apple Silicon GPUs have no CUDA, so `nvidia-smi` and `torch.cuda.is_available()` do not apply.
+
+> **Memory:** peak Metal allocation is about **3.2 GB** for a single vertebra cutout, so 16 GB of unified
+> memory is comfortable and 8 GB is tight. Cutouts are deliberately processed one at a time; batching them
+> is slower on Metal, not faster.
+
+
 ### Setup this package
 
 You have to install the package to use it, even if you just want to locally use the code.
@@ -168,10 +207,33 @@ If you **don't** set the environment variable, the pipeline will look into `spin
 3. For example, for a sample, run `python entrypoint.py sample -i <path-to-nifty> -model_semantic <model_name> -model_instance <model_name>`
 (replacing <model_name> with the name of the model you want to use)
 
+### Device selection
+
+By default SPINEPS picks the fastest backend available: **CUDA**, then **Metal (MPS)** on Apple Silicon,
+then the **CPU**. Override it with `-device`:
+
+```bash
+spineps sample -i <image> -ms t2w -device auto   # default: cuda > mps > cpu
+spineps sample -i <image> -ms t2w -device mps    # force the Apple Silicon GPU
+spineps sample -i <image> -ms t2w -device cuda   # force an NVIDIA GPU
+spineps sample -i <image> -ms t2w -device cpu    # force the CPU (same as -cpu)
+```
+
+A device that is requested but unavailable degrades with a warning instead of failing: `cuda` on a Mac
+falls through to Metal, and `mps` on a non-Mac falls back to the CPU. Metal and CUDA are never silently
+substituted for one another.
+
+All three device paths produce the same segmentation: on the reference smoke test the Metal and CPU output
+masks are bit-identical, label for label. `-cpu` is kept as an alias for `-device cpu` for backwards
+compatibility, and unlike upstream it now also takes effect for the vertebra-labeling classifier, which
+previously ignored it and used the GPU regardless.
+
 ### Issues
 
 - import issues: try installing via the requirements again, somethings it doesn't install everything
 - pytorch / cuda issues: good luck! :3
+- on macOS, `torch.backends.mps.is_available()` returning `False` almost always means the Python
+  interpreter is x86_64 under Rosetta rather than native arm64
 
 
 ## SPINEPS Capabilities

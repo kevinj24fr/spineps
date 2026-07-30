@@ -222,6 +222,7 @@ def modeltype2class(modeltype: ModelType) -> type:
 def get_actual_model(
     in_config: str | Path,
     use_cpu: bool = False,
+    device: str | None = "auto",
     **kwargs,
 ) -> Segmentation_Model | VertLabelingClassifier:
     """Creates and returns the appropriate model from a given inference config path.
@@ -231,7 +232,10 @@ def get_actual_model(
 
     Args:
         in_config (str | Path): Path to the model's inference config file, or to a folder containing it.
-        use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Defaults to False.
+        use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Overrides ``device``.
+            Defaults to False.
+        device (str | None, optional): Device to run inference on: "auto", "cpu", "cuda" or "mps".
+            "auto" picks CUDA, then Metal (mps) on Apple Silicon, then CPU. Defaults to "auto".
         **kwargs: Extra keyword arguments forwarded to the model constructor.
 
     Returns:
@@ -266,4 +270,4 @@ def get_actual_model(
 
     inference_config = load_inference_config(str(in_dir))
     modeltype: type[Segmentation_Model] = modeltype2class(inference_config.modeltype)
-    return modeltype(model_folder=in_config, inference_config=inference_config, use_cpu=use_cpu, **kwargs)
+    return modeltype(model_folder=in_config, inference_config=inference_config, use_cpu=use_cpu, device=device, **kwargs)
