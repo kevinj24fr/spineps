@@ -87,14 +87,6 @@ exclude = [
     "dist",
     "node_modules",
     "venv",
-    "spineps/Unet3D",
-    "spineps/utils/data_iterators.py",
-    "spineps/utils/default_preprocessor.py",
-    "spineps/utils/export_prediction.py",
-    "spineps/utils/get_network_from_plans.py",
-    "spineps/utils/plans_handler.py",
-    "spineps/utils/predictor.py",
-    "spineps/utils/sliding_window_prediction.py",
     "spineps/utils/image.py",  # vendored from spinalcordtoolbox
     ".toml",
 ]
@@ -167,7 +159,6 @@ ignore = [
     "PLR2004",
     "SIM105",
     "TRY003",
-    "UP038",
     "N999","E741",
     "SIM118", # dictionay keys
     "N802", # function name lowercase
@@ -184,7 +175,6 @@ ignore = [
 # Allow fix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
 unfixable = []
-ignore-init-module-imports = true
 extend-safe-fixes = ["RUF015", "C419", "C408", "B006"]
 #unnecessary-iterable-allocation-for-first-element = true
 
