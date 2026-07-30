@@ -16,8 +16,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # antspyx is pinned to 0.4.2, which publishes wheels only up to cp312. On 3.13 there is
+        # no wheel for any platform, so installing falls back to compiling ITK/ANTs from source
+        # and the job fails. Raise this once the antspyx pin can be lifted (see pyproject.toml).
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        exclude:
+          # actions/setup-python publishes no arm64 build of 3.9 for the macOS runners.
+          - os: macos-latest
+            python-version: "3.9"
 
     steps:
     - uses: actions/checkout@v4
