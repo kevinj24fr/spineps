@@ -58,8 +58,7 @@ Start with [`docs/index.md`](docs/index.md) and the [Getting Started](docs/getti
 
 ## Citation
 
-Cite these whether you use upstream or this fork. The fork contributes no method and no models, so it adds
-nothing to cite and should not displace the original work.
+Cite these whether you use upstream or this fork. The fork should not displace the original work.
 
 If you are using SPINEPS, please cite the following:
 
@@ -118,33 +117,6 @@ BibTeX citation:
   publisher={Springer}
 }
 ```
-
-## Installation (Ubuntu)
-
-This installation assumes you know your way around conda and virtual environments.
-
-### Setup Venv
-
-The order of the following instructions is important!
-
-1. Use Conda or Pip to create a venv for python 3.11, we are using conda for this example:
-```bash
-conda create --name spineps python=3.11
-conda activate spineps
-conda install pip
-```
-2. Go to <a href="https://pytorch.org/get-started/locally/">https://pytorch.org/get-started/locally/</a> and install a correct pytorch version for your machine in your venv
-3. Confirm that your pytorch package is working! Try calling these commands:
-```bash
-nvidia-smi
-```
-This should show your GPU and it's usage.
-```bash
-python -c "import torch; print(torch.cuda.is_available())"
-```
-This should throw no errors and return True
-
-
 ## Installation (macOS / Apple Silicon)
 
 > Fork-specific. Upstream does not run without CUDA — see [Changes in this fork](#changes-in-this-fork).
