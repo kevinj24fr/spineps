@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from scipy.ndimage import center_of_mass
@@ -94,20 +95,46 @@ def predict_centroids_from_both(
     return ctd
 
 
-def pipeline_version() -> str:
-    """Return the pipeline version string derived from the git commit count on ``main``.
+def _git(*args: str) -> str:
+    """Runs a git command inside the package directory and returns its stripped stdout.
+
+    The package directory matters: running git in the caller's working directory reports whatever
+    unrelated repository the user happens to be standing in, or nothing at all.
+
+    Args:
+        *args: Arguments passed to git.
 
     Returns:
-        str: A version like ``"v1.<commit-count>"``, or ``"Version not found"`` if git is unavailable.
+        str: Command output, or "" if git is unavailable or the call fails.
     """
     try:
-        label = subprocess.check_output(["git", "rev-list", "--count", "main"]).strip()
-        label = str(label).replace("'", "")
-        while not label[0].isdigit():
-            label = label[1:]
+        return subprocess.check_output(
+            ["git", *args],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
     except Exception:
-        return "Version not found"
-    return "v1." + str(label)
+        return ""
+
+
+def pipeline_version() -> str:
+    """Return the version of the running SPINEPS.
+
+    Prefers the installed distribution version, which is the only thing available when SPINEPS was
+    pip-installed rather than run from a checkout. Falls back to the commit count of the local checkout.
+
+    Returns:
+        str: The distribution version, else ``"v1.<commit-count>"``, else ``"unknown"``.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("SPINEPS")
+    except Exception:
+        pass
+    count = _git("rev-list", "--count", "HEAD")
+    return f"v1.{count}" if count.isdigit() else "unknown"
 
 
 def pipeline_revision() -> str:
@@ -116,17 +143,7 @@ def pipeline_revision() -> str:
     Returns:
         str: ``"<git-describe>::<full-commit-hash>"``; either part is empty if the corresponding git call fails.
     """
-    label = ""
-    rev = ""
-    try:
-        label = subprocess.check_output(["git", "describe", "--always"]).strip()
-    except Exception:
-        pass
-    try:
-        rev = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("ascii").strip()
-    except Exception:
-        pass
-    return str(label) + "::" + str(rev)
+    return _git("describe", "--always") + "::" + _git("rev-parse", "HEAD")
 
 
 if __name__ == "__main__":

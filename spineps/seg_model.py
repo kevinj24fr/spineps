@@ -316,7 +316,8 @@ class Segmentation_Model(ABC):
         """Builds a summary dictionary describing this model.
 
         Returns:
-            dict[str, str]: Model id, model path, modalities, acquisition and resolution range as strings.
+            dict[str, str]: Model id, model path, modalities, acquisition, resolution range and the device
+                inference ran on, as strings.
         """
         info = {
             "name": self.modelid(),  # self.inference_config.__repr__()
@@ -324,6 +325,9 @@ class Segmentation_Model(ABC):
             "modality": str(self.modalities()),
             "aquisition": str(self.acquisition()),
             "resolution_range": str(self.inference_config.resolution_range),
+            # Recorded because the backend affects the result: Metal and CPU agree to about Dice 0.97 on
+            # real data, not exactly, so a mask is only reproducible if you know where it was computed.
+            "device": str(self.device),
         }
         # if input_zms is not None:
         #    proc_zms = self.calc_recommended_resampling_zoom(input_zms)
