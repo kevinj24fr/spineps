@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# from utils.predictor import nnUNetPredictor
 from typing import Union
 
 import nibabel as nib
