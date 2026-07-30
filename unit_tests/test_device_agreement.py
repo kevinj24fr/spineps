@@ -81,9 +81,7 @@ class Test_Metal_Agrees_With_CPU(unittest.TestCase):
 
         agreement = (cpu_logits.argmax(1) == mps_logits.argmax(1)).float().mean().item()
         mean_abs_diff = (cpu_logits - mps_logits).abs().mean().item()
-        correlation = float(
-            np.corrcoef(cpu_logits.flatten().numpy(), mps_logits.flatten().numpy())[0, 1]
-        )
+        correlation = float(np.corrcoef(cpu_logits.flatten().numpy(), mps_logits.flatten().numpy())[0, 1])
 
         self.assertGreaterEqual(
             agreement,
