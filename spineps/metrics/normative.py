@@ -31,6 +31,12 @@ REFERENCE_FILE = Path(__file__).with_name("reference_data") / "spider_normative_
 #:
 #: Comparing an uncorrected SPINEPS measurement against the human-derived distribution would make every
 #: level look roughly a millimetre roomier than it is -- a systematic bias towards missing narrowing.
+#:
+#: This offset remains the weakest number in the package. SPINEPS was trained on 179 of SPIDER's 218
+#: subjects and the estimate did not exclude them, so it is optimistic. It cannot be re-estimated on the
+#: RSNA lumbar dataset either: RSNA supplies stenosis *grades* and point coordinates, not segmentation
+#: masks, so there is nothing there to compare a canal outline against. Re-estimating it needs another
+#: dataset with human canal segmentations that SPINEPS has not seen.
 SPINEPS_CANAL_OFFSET_MM = 1.20
 
 #: Percentile columns available in the reference table, in order.

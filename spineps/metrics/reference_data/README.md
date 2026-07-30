@@ -63,3 +63,45 @@ millimetre roomier than it is — a systematic bias towards *missing* narrowing.
 **The agreement above is optimistic.** SPINEPS was trained on 179 of SPIDER's 218 subjects, and this
 comparison did not exclude them, so r = +0.913 reflects partly-seen data. The 1.20 mm offset should be
 re-estimated on a dataset SPINEPS has never seen before it is relied on.
+
+---
+
+## `rsna_l4l5_operating_points.tsv`
+
+Sensitivity, specificity and predictive values for `narrow_ap_diameter_mm` measured at the L4/L5 disc,
+scored against radiologist-assigned canal stenosis grade (Moderate or Severe versus Normal/Mild).
+
+**This is the only part of this package validated against a clinical reference.** Everything else —
+backend reproducibility, agreement with human canal annotation, coverage invariance — establishes that the
+measurement is well behaved, not that it means anything.
+
+### What was measured
+
+| | |
+|---|---|
+| Dataset | RSNA 2024 Lumbar Spine Degenerative Classification, sagittal T2/STIR |
+| Studies | 286 measured at L4/L5 (of 300 segmented, 0 segmentation failures) |
+| Level match rate | 99% (281/284 at the time of the level-matching count) |
+| **AUC** | **0.917** (0.908 on a prevalence-matched subsample) |
+| Sampling | class-balanced 150/150, positives drawn representatively (48.7% Moderate / 51.3% Severe vs 48.2/51.8 in the population) |
+
+Balancing does not inflate AUC — it is a rank statistic over positive-negative pairs and so is invariant
+to class mixing; the prevalence-matched subsample confirms this empirically. Balancing *does* inflate
+anything conditioned on a positive call, which is why the table reports predictive values at the true
+population prevalence of **24.9%** rather than at the sampled 50%.
+
+### How to read it
+
+**This behaves as a rule-out test.** NPV runs 0.94–0.99 across the useful range: a wide canal on sagittal
+T2 reliably means a reader will not call significant stenosis. PPV at the Youden-optimal 10.8 mm is 0.67,
+so a narrow measurement triages rather than diagnoses. That asymmetry is expected — canal stenosis is
+graded on the **axial** dural sac, so a sagittal AP diameter is a good screen and a poor adjudicator.
+
+### Do not over-apply this
+
+- **L4/L5 only.** Prevalence and anatomy differ by level (24.9% at L4/L5 against 3.5% at L5/S1), so these
+  thresholds do not transfer. Canal diameter also varies by level; see the normative table above.
+- **Diameters here are raw SPINEPS output**, not offset-corrected. Do not combine these thresholds with
+  `calibrate()`.
+- Predictive values are derived from sensitivity/specificity via Bayes, not directly observed at 24.9%.
+- One dataset, one grading scheme, no external replication, and grades carry inter-reader variability.
