@@ -35,6 +35,11 @@ LUMB = slice(19, None)  # 19 to end (23)
 DIVIDE_BY_ZERO_OFFSET = 1e-8
 
 # Cost-matrix class indices (0-based, matching VertExact) of anatomically special vertebrae.
+#: Cost the sequence solver pays to repeat a class. A repeated T12 becomes T13 and a repeated L5 becomes
+#: L6, so at zero the solver inserts a transitional vertebra whenever it marginally fits. The value is
+#: chosen against radiologist level annotations; see the fork's validation notes.
+DEFAULT_PUNISH_MULTIPLE_SEQUENCE = 0.0
+
 # T11/T12/L5 and the region starts (DEFAULT_REGION_STARTS) are imported from find_min_cost_path,
 # their canonical home (the path solver that consumes them).
 C1_CLASS_IDX = 0
@@ -127,6 +132,7 @@ def run_model_for_vert_labeling(
     disable_c1: bool = True,
     force_c1: int | None = None,
     force_c2: int | None = None,
+    punish_multiple_sequence: float = DEFAULT_PUNISH_MULTIPLE_SEQUENCE,
 ) -> tuple[dict[int, int], float, list[int], list[int], list, list, dict]:
     """Run the labeling classifier over a whole image/instance pair and resolve a vertebra label sequence.
 
@@ -190,6 +196,7 @@ def run_model_for_vert_labeling(
         disable_c1=disable_c1,
         force_c1_instance=force_c1_instance,
         force_c2_instance=force_c2_instance,
+        punish_multiple_sequence=punish_multiple_sequence,
     )
     assert len(orig_label) == len(fpath_post), f"{len(orig_label)} != {len(fpath_post)}"
     labelmap = {orig_label[idx]: fpath_post[idx] for idx in range(len(orig_label))}
@@ -461,7 +468,7 @@ def find_vert_path_from_predictions(
     allow_thoracic_skip: bool = False,
     allow_lumbar_skip: bool = False,
     #
-    punish_multiple_sequence: float = 0.0,
+    punish_multiple_sequence: float = DEFAULT_PUNISH_MULTIPLE_SEQUENCE,
     punish_skip_sequence: float = 0.0,
     punish_skip_at_region_sequence: float = 0.0,
     #
@@ -652,7 +659,10 @@ def find_vert_path_from_predictions(
         min_costs_path = [[]]
         fpath = list(np.argmax(cost_matrix, axis=1))
     else:
-        allow_multiple_at_class = [T12_CLASS_IDX, L5_CLASS_IDX] if not proc_lab_force_no_tl_anomaly else [L5_CLASS_IDX]
+        # A repeated T12 becomes T13 and a repeated L5 becomes L6, so suppressing transitional anomalies
+        # has to remove both. Leaving L5 in this list meant the flag suppressed T13 while still permitting
+        # L6, which is the transitional call that actually renumbers the lumbar spine.
+        allow_multiple_at_class = [T12_CLASS_IDX, L5_CLASS_IDX] if not proc_lab_force_no_tl_anomaly else []
         allow_skip_at_class = [T11_CLASS_IDX] if not proc_lab_force_no_tl_anomaly else []
         allow_skip_at_region = []
         if allow_cervical_skip:
