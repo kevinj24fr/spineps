@@ -53,13 +53,30 @@ def mps_is_available() -> bool:
         return False
 
 
-def enable_mps_cpu_fallback() -> None:
+def enable_mps_cpu_fallback(logger=None) -> None:
     """Allows ops with no Metal kernel to fall back to the CPU instead of raising.
 
     Must run before the first MPS op, otherwise torch may already have cached the setting. Does not
-    override the variable if the user set it explicitly.
+    override the variable if the user set it explicitly. Reports the resulting state, because a silent
+    fallback shows up only as an unexplained slowdown: any op without a Metal kernel runs on the CPU,
+    which costs both time and a device transfer.
+
+    Args:
+        logger (optional): Logger used to report the fallback state. Defaults to None (module logger).
     """
-    os.environ.setdefault(MPS_FALLBACK_ENV, "1")
+    logger = logger if logger is not None else _logger
+    if MPS_FALLBACK_ENV in os.environ:
+        logger.print(
+            f"{MPS_FALLBACK_ENV}={os.environ[MPS_FALLBACK_ENV]} was set externally, leaving it alone",
+            Log_Type.NEUTRAL,
+        )
+        return
+    os.environ[MPS_FALLBACK_ENV] = "1"
+    logger.print(
+        f"{MPS_FALLBACK_ENV}=1: ops without a Metal kernel will run on the CPU instead of failing",
+        Log_Type.NEUTRAL,
+        verbose=True,
+    )
 
 
 def resolve_device(
@@ -69,24 +86,26 @@ def resolve_device(
 ) -> torch.device:
     """Resolves a device request into a concrete, available :class:`torch.device`.
 
-    With ``"auto"`` the fastest available backend wins: CUDA, then Metal (MPS), then CPU. A backend that
-    was asked for by name but is not available degrades rather than crashing: an unavailable CUDA request
-    falls through to Metal or the CPU, and an unavailable Metal request falls back to the CPU. Metal is
-    never substituted for an explicit CUDA request or vice versa, since the two are not interchangeable
-    for reproducing results.
+    ``"auto"`` picks the fastest available backend: CUDA, then Metal (MPS), then CPU. Naming a backend
+    explicitly is a instruction, not a preference: if it is unavailable this raises rather than quietly
+    running somewhere else. That matters because the backends are not numerically interchangeable --
+    Metal and CPU agree to roughly Dice 0.97 on real data, not exactly -- so a batch script that asks for
+    ``cuda`` and silently gets Metal would produce different masks with no error and no record of why.
 
     Args:
         device (Device_Kind | str | torch.device | None, optional): Requested backend, one of "auto",
             "cpu", "cuda" or "mps". None is treated as "auto". Defaults to "auto".
         use_cpu (bool, optional): Legacy switch that forces the CPU and overrides ``device``.
             Defaults to False.
-        logger (optional): Logger used to report fallbacks. Defaults to None (module logger).
+        logger (optional): Logger used to report which backend "auto" selected. Defaults to None
+            (module logger).
 
     Returns:
         torch.device: An available device. CUDA is returned with an explicit index of 0.
 
     Raises:
         ValueError: If ``device`` is not one of the supported backends.
+        RuntimeError: If a specific backend was requested by name but is not available on this machine.
     """
     logger = logger if logger is not None else _logger
 
@@ -104,28 +123,34 @@ def resolve_device(
     if requested == "cpu":
         return torch.device("cpu")
 
+    # An explicitly named backend is honoured or refused; it is never swapped for a different one,
+    # because the swap would change the segmentation without saying so.
     if requested == "mps":
-        if mps_is_available():
-            enable_mps_cpu_fallback()
-            return torch.device("mps")
-        logger.print("Metal (mps) was requested but is not available, falling back to cpu", Log_Type.WARNING)
-        return torch.device("cpu")
+        if not mps_is_available():
+            raise RuntimeError(
+                "device='mps' was requested but Metal is not available on this machine. "
+                "On a Mac this usually means the Python interpreter is x86_64 running under Rosetta "
+                "instead of native arm64. Use device='auto' to select the best available backend, "
+                "or device='cpu' to force the CPU."
+            )
+        enable_mps_cpu_fallback(logger=logger)
+        return torch.device("mps")
 
     if requested == "cuda":
-        if cuda_is_available():
-            return torch.device("cuda", 0)
-        if mps_is_available():
-            logger.print("cuda was requested but is not available, using Metal (mps) instead", Log_Type.WARNING)
-            enable_mps_cpu_fallback()
-            return torch.device("mps")
-        logger.print("cuda was requested but is not available, falling back to cpu", Log_Type.WARNING)
-        return torch.device("cpu")
+        if not cuda_is_available():
+            raise RuntimeError(
+                "device='cuda' was requested but no CUDA GPU is available. Metal is not substituted for "
+                "CUDA, since the two do not produce identical segmentations. Use device='auto' to select "
+                "the best available backend, or name the backend you want explicitly."
+            )
+        return torch.device("cuda", 0)
 
-    # "auto": fastest backend first.
+    # "auto": fastest backend first, and say which one was chosen so it ends up in the run log.
     if cuda_is_available():
         return torch.device("cuda", 0)
     if mps_is_available():
-        enable_mps_cpu_fallback()
+        enable_mps_cpu_fallback(logger=logger)
+        logger.print("auto-selected Metal (mps); pass -device cpu to force the CPU", Log_Type.NEUTRAL)
         return torch.device("mps")
     return torch.device("cpu")
 

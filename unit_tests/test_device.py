@@ -79,16 +79,29 @@ class Test_ResolveDevice(unittest.TestCase):
             self.assertEqual(resolve_device("mps", use_cpu=True).type, "cpu")
             self.assertEqual(resolve_device("cuda", use_cpu=True).type, "cpu")
 
-    def test_unavailable_cuda_falls_back_to_next_best(self):
-        with _Availability(cuda=False, mps=True):
-            self.assertEqual(resolve_device("cuda").type, "mps")
-        with _Availability(cuda=False, mps=False):
-            self.assertEqual(resolve_device("cuda").type, "cpu")
+    def test_explicit_cuda_request_raises_when_unavailable(self):
+        """Metal must never be silently substituted for CUDA: the two do not agree voxel-for-voxel."""
+        for mps_present in (True, False):
+            with _Availability(cuda=False, mps=mps_present), self.assertRaises(RuntimeError) as ctx:
+                resolve_device("cuda")
+            self.assertIn("cuda", str(ctx.exception).lower())
 
-    def test_unavailable_mps_falls_back_to_cpu(self):
-        """A CUDA box asked for mps gets cpu, never a silent switch to cuda."""
-        with _Availability(cuda=True, mps=False):
-            self.assertEqual(resolve_device("mps").type, "cpu")
+    def test_explicit_mps_request_raises_when_unavailable(self):
+        with _Availability(cuda=True, mps=False), self.assertRaises(RuntimeError) as ctx:
+            resolve_device("mps")
+        self.assertIn("mps", str(ctx.exception).lower())
+
+    def test_auto_never_raises_whatever_is_available(self):
+        """auto is the only mode allowed to degrade, so it must always return something usable."""
+        for cuda, mps in ((True, True), (True, False), (False, True), (False, False)):
+            with _Availability(cuda=cuda, mps=mps):
+                self.assertIn(resolve_device("auto").type, ("cuda", "mps", "cpu"))
+
+    def test_use_cpu_wins_over_an_unavailable_explicit_request(self):
+        """use_cpu=True is an explicit CPU instruction, so it must not trip the availability check."""
+        with _Availability(cuda=False, mps=False):
+            self.assertEqual(resolve_device("cuda", use_cpu=True).type, "cpu")
+            self.assertEqual(resolve_device("mps", use_cpu=True).type, "cpu")
 
     def test_none_is_treated_as_auto(self):
         with _Availability(cuda=False, mps=True):

@@ -127,10 +127,36 @@ query CUDA memory unconditionally, so on a machine without CUDA they abort with
 working fallback. This fork makes those queries device-aware, adds a single tested device policy across all
 three model types, and so runs on Apple Silicon and on CPU-only hosts.
 
-Correctness comes first: **the segmentations this fork produces on Metal are bit-identical to the ones the
-CPU path produces** — verified voxel-for-voxel on the full pipeline, with 100% agreement on the
-nnU-Net logits' argmax. Metal is also considerably faster than the CPU, but the point is that the pipeline
-runs at all and gives you the same answer.
+### How closely does Metal agree with the CPU?
+
+Closely, but **not exactly**, and the difference is worth understanding before you use it for anything
+that gets published. Measured on real clinical sagittal T2w data:
+
+| | Metal vs CPU |
+|---|---|
+| Voxels identical | 99.7% |
+| Mean Dice, semantic mask | 0.966 |
+| Mean Dice, instance mask | 0.972 |
+| Vertebra level identities (T11–S1) | identical |
+
+Disagreement concentrates in thin structures, where a single voxel of boundary jitter costs a lot of
+Dice: spinous process 0.931 and endplates 0.921, against 0.978 for the spinal canal.
+
+The cause is ordinary floating-point non-determinism, not a Metal bug. The two backends accumulate
+convolutions in a different order, which shifts logits by around 1e-2. Almost everywhere that is
+irrelevant, but at a partial-volume boundary where two classes are nearly tied it can flip the argmax.
+This is the same class of difference you get between two CUDA GPUs of different generations.
+
+Practical guidance:
+
+- **Run a cohort on one backend.** Don't mix Metal and CPU results within a study.
+- The resolved device is recorded per model in the output `*_ctd.json`, so you can always tell after
+  the fact where a mask was computed.
+- Naming a backend explicitly (`-device mps`) is treated as an instruction: if it isn't available the
+  run fails rather than silently using something else. Only `-device auto` will fall back.
+- Whether this matters for *your* endpoint depends on the endpoint. A measurement that uses the
+  segmentation only as a seed and then grows a region on the source image can be completely unaffected;
+  one that integrates a thin structure's volume directly will not be. Check yours rather than assuming.
 
 Two things matter on a Mac:
 
@@ -219,14 +245,15 @@ spineps sample -i <image> -ms t2w -device cuda   # force an NVIDIA GPU
 spineps sample -i <image> -ms t2w -device cpu    # force the CPU (same as -cpu)
 ```
 
-A device that is requested but unavailable degrades with a warning instead of failing: `cuda` on a Mac
-falls through to Metal, and `mps` on a non-Mac falls back to the CPU. Metal and CUDA are never silently
-substituted for one another.
+**Naming a backend is an instruction, not a preference.** `-device mps` on a machine without Metal, or
+`-device cuda` without an NVIDIA GPU, fails with a clear error. It does not quietly run somewhere else,
+because the backends do not produce identical masks (see
+[How closely does Metal agree with the CPU?](#how-closely-does-metal-agree-with-the-cpu)) and a batch
+script that asked for `cuda` and silently got Metal would produce different results with no record of it.
+Only `-device auto` is allowed to degrade, and it logs which backend it picked.
 
-All three device paths produce the same segmentation: on the reference smoke test the Metal and CPU output
-masks are bit-identical, label for label. `-cpu` is kept as an alias for `-device cpu` for backwards
-compatibility, and unlike upstream it now also takes effect for the vertebra-labeling classifier, which
-previously ignored it and used the GPU regardless.
+`-cpu` is kept as an alias for `-device cpu`. Unlike upstream it now also takes effect for the
+vertebra-labeling classifier, which previously ignored it and used the GPU regardless.
 
 ### Issues
 
