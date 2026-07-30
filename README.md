@@ -32,6 +32,7 @@ This is a segmentation pipeline to automatically, and robustly, segment the whol
 | **`spineps sample --help`** | Crashed with an `AssertionError` from argparse at every terminal width. Fixed. |
 | **SciPy 2.0 readiness** | The labeling phase imported from `scipy.ndimage.interpolation`, a namespace scheduled for removal. |
 | **Honest dependency metadata** | `torch` was never declared, though Metal depends on it: before 2.3, `mps.is_available()` returns `True` and then `Conv3D` raises. Now pinned `>=2.3`. The Python range claimed up to 3.14 while the pinned `antspyx` caps at 3.12. |
+| **Derived measurements** | A `spineps.metrics` package turning the masks into numbers: per-level canal geometry, level-numbering confidence flags, and paraspinal muscle/fat volumes read from the whole-body segmentation the pipeline already computes and discards. Includes a per-level reference distribution from 210 human-annotated studies, and the one endpoint validated against a clinical reference (canal AP diameter at L4/L5 versus radiologist stenosis grade, AUC 0.917 on 286 RSNA studies). See [`spineps/metrics/reference_data/README.md`](spineps/metrics/reference_data/README.md) for what that does and does not establish. |
 | **Housekeeping** | Removed 1,479 lines of unreachable vendored nnU-Net code; `ruff check` and all pre-commit hooks now pass; CI tests macOS as well as Linux and Windows. |
 
 Everything else — models, labels, pipeline structure, CLI semantics — is upstream's and unchanged.
