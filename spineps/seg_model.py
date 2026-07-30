@@ -14,12 +14,12 @@ from TPTBox import NII, ZOOMS, Image_Reference, Log_Type, No_Logger, to_nii
 from TPTBox.segmentation.nnUnet_utils.inference_api import load_inf_model, run_inference
 from typing_extensions import Self
 
-from spineps.architectures.pl_unet import PLNet
-from spineps.architectures_new.pl_unet import PLNet as PLNet_new
 from spineps.seg_enums import Acquisition, InputType, Modality, OutputType
 from spineps.utils.citation_reminder import citation_reminder
+from spineps.utils.device import Device_Kind, describe_device, device_to_ddevice, resolve_device
 from spineps.utils.filepaths import search_path
 from spineps.utils.seg_modelconfig import Segmentation_Inference_Config, load_inference_config
+from spineps.utils.tptbox_compat import patch_nnunet_gpu_memory_helpers
 
 threads_started = False
 
@@ -40,6 +40,7 @@ class Segmentation_Model(ABC):
         name (str): Optional human-readable model name.
         logger (No_Logger): Logger used for all model output.
         use_cpu (bool): If true, runs inference on CPU instead of GPU.
+        device (torch.device): Resolved device inference runs on (CUDA, Metal/MPS or CPU).
         inference_config (Segmentation_Inference_Config): Configuration describing expected inputs, resolution range and labels.
         default_verbose (bool): Default verbosity for printing.
         default_allow_tqdm (bool): Whether a progress bar is shown during segmentation by default.
@@ -54,6 +55,7 @@ class Segmentation_Model(ABC):
         use_cpu: bool = False,
         default_verbose: bool = False,
         default_allow_tqdm: bool = True,
+        device: Device_Kind | str | None = "auto",
     ):
         """Initializes the segmentation model, finding and loading the corresponding inference config for that model.
 
@@ -61,18 +63,24 @@ class Segmentation_Model(ABC):
             model_folder (str | Path): Path to that model's folder.
             inference_config (Segmentation_Inference_Config | None, optional): Inference config to use; if None, loads
                 "inference_config.json" from the model folder. Defaults to None.
-            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Defaults to False.
+            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Overrides ``device``.
+                Defaults to False.
             default_verbose (bool, optional): If true, prints more information when used. Defaults to False.
             default_allow_tqdm (bool, optional): If true, shows a progress bar while segmenting. Defaults to True.
+            device (Device_Kind | str | None, optional): Device to run inference on: "auto", "cpu", "cuda" or "mps".
+                "auto" picks CUDA, then Metal (mps) on Apple Silicon, then CPU. Defaults to "auto".
 
         Raises:
             AssertionError: If model_folder does not exist.
+            ValueError: If ``device`` is not a supported backend.
         """
         self.name: str = ""
         assert Path(model_folder).exists(), f"model_folder does not exist, got {model_folder}"
 
         self.logger = No_Logger()
-        self.use_cpu = use_cpu
+        self.device = resolve_device(device, use_cpu=use_cpu, logger=self.logger)
+        # Kept in sync with self.device so external callers reading .use_cpu keep working.
+        self.use_cpu = self.device.type == "cpu"
 
         if inference_config is None:
             json_dir = Path(model_folder).joinpath("inference_config.json")
@@ -87,7 +95,7 @@ class Segmentation_Model(ABC):
         self.default_allow_tqdm = default_allow_tqdm
         self.predictor = None
 
-        self.print("initialized with inference config", self.inference_config)
+        self.print(f"initialized on {describe_device(self.device)} with inference config", self.inference_config)
 
     @abstractmethod
     def load(self, folds: tuple[str, ...] | None = None) -> Self:
@@ -349,6 +357,7 @@ class Segmentation_Model_NNunet(Segmentation_Model):
         use_cpu: bool = False,
         default_verbose: bool = False,
         default_allow_tqdm: bool = True,
+        device: Device_Kind | str | None = "auto",
     ):
         """Initializes an nnU-Net-backed segmentation model.
 
@@ -356,11 +365,14 @@ class Segmentation_Model_NNunet(Segmentation_Model):
             model_folder (str | Path): Path to the nnU-Net model folder.
             inference_config (Segmentation_Inference_Config | None, optional): Inference config; if None, loads it from the
                 model folder. Defaults to None.
-            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Defaults to False.
+            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Overrides ``device``.
+                Defaults to False.
             default_verbose (bool, optional): If true, prints more information when used. Defaults to False.
             default_allow_tqdm (bool, optional): If true, shows a progress bar while segmenting. Defaults to True.
+            device (Device_Kind | str | None, optional): Device to run inference on: "auto", "cpu", "cuda" or "mps".
+                Defaults to "auto".
         """
-        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm)
+        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm, device=device)
 
     def load(self, folds: tuple[str, ...] | None = None) -> Self:
         """Loads the nnU-Net predictor and its ensemble folds from the model folder.
@@ -382,6 +394,8 @@ class Segmentation_Model_NNunet(Segmentation_Model):
             conf_folds = (conf_folds,)
         else:
             conf_folds = tuple(str(i) for i in conf_folds)
+        # TPTBox queries CUDA memory unconditionally; make that work on Metal/CPU too.
+        patch_nnunet_gpu_memory_helpers()
         self.predictor = load_inf_model(
             model_folder=self.model_folder,
             step_size=self.inference_config.default_step_size,
@@ -390,7 +404,7 @@ class Segmentation_Model_NNunet(Segmentation_Model):
             init_threads=not threads_started,
             allow_non_final=True,
             verbose=False,
-            ddevice="cuda" if not self.use_cpu else "cpu",
+            ddevice=device_to_ddevice(self.device),
         )
         threads_started = True
         self.predictor.allow_tqdm = self.default_allow_tqdm
@@ -434,6 +448,7 @@ class Segmentation_Model_Unet3D(Segmentation_Model):
         use_cpu: bool = False,
         default_verbose: bool = False,
         default_allow_tqdm: bool = True,
+        device: Device_Kind | str | None = "auto",
     ):
         """Initializes a 3D U-Net-backed segmentation model.
 
@@ -441,14 +456,17 @@ class Segmentation_Model_Unet3D(Segmentation_Model):
             model_folder (str | Path): Path to the model folder containing the checkpoint.
             inference_config (Segmentation_Inference_Config | None, optional): Inference config; if None, loads it from the
                 model folder. Defaults to None.
-            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Defaults to False.
+            use_cpu (bool, optional): If true, runs inference on CPU instead of GPU. Overrides ``device``.
+                Defaults to False.
             default_verbose (bool, optional): If true, prints more information when used. Defaults to False.
             default_allow_tqdm (bool, optional): If true, shows a progress bar while segmenting. Defaults to True.
+            device (Device_Kind | str | None, optional): Device to run inference on: "auto", "cpu", "cuda" or "mps".
+                Defaults to "auto".
 
         Raises:
             AssertionError: If the inference config expects more than one input.
         """
-        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm)
+        super().__init__(model_folder, inference_config, use_cpu, default_verbose, default_allow_tqdm, device=device)
         assert len(self.inference_config.expected_inputs) == 1, "Unet3D cannot expect more than one input"
 
     def load(self, folds: tuple[str, ...] | None = None) -> Self:  # noqa: ARG002
@@ -463,6 +481,11 @@ class Segmentation_Model_Unet3D(Segmentation_Model):
         Raises:
             AssertionError: If exactly one checkpoint file is not found in the model folder.
         """
+        # Imported here rather than at module scope: these pull in pytorch_lightning, which costs ~0.7 s of
+        # start-up that every CLI invocation would otherwise pay even when no checkpoint is ever loaded.
+        from spineps.architectures.pl_unet import PLNet
+        from spineps.architectures_new.pl_unet import PLNet as PLNet_new
+
         assert os.path.exists(self.model_folder)  # noqa: PTH110
 
         chktpath = search_path(self.model_folder, "**/*weights*.ckpt")
@@ -473,7 +496,6 @@ class Segmentation_Model_Unet3D(Segmentation_Model):
             model = PLNet_new.load_from_checkpoint(checkpoint_path=chktpath[0], weights_only=False)
 
         model.eval()
-        self.device = torch.device("cuda:0" if torch.cuda.is_available() and not self.use_cpu else "cpu")
         model.to(self.device)
         self.predictor = model
         self.print("Model loaded from", self.model_folder, Log_Type.OK, verbose=True)
@@ -520,11 +542,10 @@ class Segmentation_Model_Unet3D(Segmentation_Model):
             target = target.unsqueeze(0)
             target = target.unsqueeze(0)
             logits = self.predictor.forward(target.to(self.device))
-        soft_max = torch.nn.Softmax(dim=1)
-        pred_x = soft_max(logits)
-        _, pred_cls = torch.max(pred_x, 1)
+        # Softmax is monotonic along the class axis, so it cannot change the argmax. Taking it directly on the
+        # logits avoids allocating two more full-size tensors (~92 MB per cutout for the instance model).
+        pred_cls = torch.argmax(logits, 1)
         del logits
-        del pred_x
         pred_cls = pred_cls.detach().cpu().numpy()[0]
         seg_nii: NII = input_nii_.set_array(pred_cls)
         self.print("out", seg_nii.zoom, seg_nii.orientation, seg_nii.shape) if verbose else None

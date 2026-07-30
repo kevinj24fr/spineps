@@ -23,6 +23,7 @@ from spineps.seg_model import Segmentation_Model
 from spineps.seg_pipeline import logger, predict_centroids_from_both
 from spineps.seg_utils import Modality_Pair, check_input_model_compatibility, check_model_modality_acquisition, find_best_matching_model
 from spineps.utils.citation_reminder import citation_reminder
+from spineps.utils.device import device_to_ddevice
 
 
 @citation_reminder
@@ -472,7 +473,7 @@ def process_img_nii(  # noqa: C901
                     "Compute spine crop with VIBESegmentator https://link.springer.com/article/10.1007/s00330-025-12035-9", Log_Type.OK
                 )
                 out_vibeseg = output_paths["out_vibeseg"]
-                crop = compute_crop(input_nii, out_vibeseg, ddevice="cpu" if model_semantic.use_cpu else "cuda", logger=logger)
+                crop = compute_crop(input_nii, out_vibeseg, ddevice=device_to_ddevice(model_semantic.device), logger=logger)
                 if timing:
                     logger.print(
                         f"Compute cropping took: {perf_counter() - start_time2:.2f} seconds", Log_Type.OK, verbose=log_inference_time

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import inspect
-
-# from utils.predictor import nnUNetPredictor
 from time import perf_counter
 from typing import TYPE_CHECKING, Literal
 
@@ -59,6 +57,11 @@ def compute_crop(
     """
     from TPTBox.core.vert_constants import Full_Body_Instance_Vibe
     from TPTBox.segmentation import run_vibeseg
+
+    from spineps.utils.tptbox_compat import patch_nnunet_gpu_memory_helpers
+
+    # TPTBox queries CUDA memory unconditionally; make that work on Metal/CPU too.
+    patch_nnunet_gpu_memory_helpers()
 
     if _has_logger_arg(run_vibeseg):
         out = run_vibeseg(nii, out_file, dataset_id=dataset_id, ddevice=ddevice, gpu=gpu, max_folds=max_folds, logger=logger)
