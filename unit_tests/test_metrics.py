@@ -422,3 +422,54 @@ class Test_Soft_Tissue_Symmetric_Laterality(unittest.TestCase):
         # Slice 0 lies outside the symmetric window (midline 5 -> window 1..9), so it is excluded and the
         # comparison stays fair rather than being inflated by the truncated side.
         self.assertAlmostEqual(result.laterality["paraspinal_muscle"], 1.0, places=6)
+
+
+class Test_Canal_Robust_Narrow_Statistic(unittest.TestCase):
+    """The narrow statistic must survive one bad row while still seeing a real narrowing.
+
+    The raw minimum fails the first test: a single row of segmentation jitter sets it, which is why it
+    moved by up to 2.7 mm between compute backends on real data.
+    """
+
+    def test_single_outlier_row_moves_min_but_not_narrow(self):
+        semantic, verts, _ = _canal_phantom(ap_voxels=8)
+        arr = semantic.get_seg_array()
+        clean = measure_canal(_nii(arr), verts, min_ap_extent_mm=0.0, include_disc_levels=False)
+        # One row of the L4 band pinched to half width, as a stray-voxel artefact would do.
+        arr[:, 24:28, 30] = 0
+        jittered = measure_canal(_nii(arr), verts, min_ap_extent_mm=0.0, include_disc_levels=False)
+
+        def level(result, name):
+            return next(lvl for lvl in result.levels if lvl.level_name == name)
+
+        before, after = level(clean, "L4"), level(jittered, "L4")
+        self.assertLess(after.min_ap_diameter_mm, before.min_ap_diameter_mm, "min should move")
+        self.assertAlmostEqual(
+            after.narrow_ap_diameter_mm,
+            before.narrow_ap_diameter_mm,
+            places=6,
+            msg="a single artefact row must not move the robust statistic",
+        )
+
+    def test_sustained_narrowing_is_still_detected(self):
+        """Robustness must not mean blindness: a real narrowing over many rows has to show up."""
+        semantic, verts, _ = _canal_phantom(ap_voxels=8)
+        arr = semantic.get_seg_array()
+        arr[:, 24:28, 24:34] = 0  # most of the L4 band genuinely narrowed
+        result = measure_canal(_nii(arr), verts, min_ap_extent_mm=0.0, include_disc_levels=False)
+        l4 = next(lvl for lvl in result.levels if lvl.level_name == "L4")
+        self.assertAlmostEqual(l4.narrow_ap_diameter_mm, 4 * ZOOM[1], places=6)
+
+    def test_percentile_zero_reproduces_the_raw_minimum(self):
+        semantic, verts, _ = _canal_phantom(ap_voxels=8)
+        arr = semantic.get_seg_array()
+        arr[:, 24:28, 30] = 0
+        result = measure_canal(_nii(arr), verts, min_ap_extent_mm=0.0, narrow_percentile=0.0)
+        for lvl in result.levels:
+            self.assertAlmostEqual(lvl.narrow_ap_diameter_mm, lvl.min_ap_diameter_mm, places=6)
+
+    def test_rows_are_ordered_by_the_robust_statistic(self):
+        semantic, verts, _ = _canal_phantom(ap_voxels=8)
+        rows = measure_canal(semantic, verts, min_ap_extent_mm=0.0).as_rows()
+        narrows = [r["narrow_ap_diameter_mm"] for r in rows]
+        self.assertEqual(narrows, sorted(narrows))
