@@ -97,10 +97,9 @@ DEFAULT_MIN_AP_EXTENT_MM = 2.0
 DEFAULT_NARROW_PERCENTILE = 10.0
 
 #: Range an adult spinal canal AP diameter can plausibly fall in. Values outside it are reported anyway --
-#: this is a measurement tool, not a filter -- but they trigger a warning, because in practice the cause is
-#: almost never anatomy. Feeding in a mask whose affine was rebuilt from voxel spacing alone silently
-#: relabels the axes, and on a sagittal study that measures "anterior-posterior" along the left-right axis;
-#: this guard was added after exactly that mistake produced 90 mm "diameters" that nothing objected to.
+#: this is a measurement tool, not a filter -- but they trigger a warning, because the cause is almost never
+#: anatomy. A mask whose affine does not describe its array axes measures AP along the wrong axis and can
+#: yield diameters of 90 mm or more without any other symptom.
 PLAUSIBLE_AP_DIAMETER_MM = (2.0, 30.0)
 
 
