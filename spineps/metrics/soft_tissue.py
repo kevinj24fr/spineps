@@ -215,9 +215,7 @@ def measure_soft_tissue(vibe_seg: Union[NII, str, Path]) -> SoftTissueVolumes:
         "the VIBE model is trained for VIBE/Dixon acquisitions and is run here only to place a crop box; "
         "these volumes are unvalidated on sagittal T2w and must be checked before being used as measurements"
     )
-    truncated_soft_tissue = [
-        name for names in SOFT_TISSUE_GROUPS.values() for name in names if name in result.truncated_labels
-    ]
+    truncated_soft_tissue = [name for names in SOFT_TISSUE_GROUPS.values() for name in names if name in result.truncated_labels]
     if truncated_soft_tissue:
         result.warnings.append(
             f"left-right coverage is only {result.lr_coverage_mm:.0f} mm and these labels reach a slab edge: "
