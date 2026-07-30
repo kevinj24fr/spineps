@@ -24,16 +24,15 @@ a numbering with no flags raised can still be wrong. Absence of flags is weaker 
 
 Flagging does not improve a per-level endpoint
 ----------------------------------------------
-Tested on 281 RSNA studies, measuring canal AP diameter at L4/L5 and scoring it against the radiologist's
-canal stenosis grade: studies with clean numbering gave AUC 0.924 and studies with a transitional level
-gave 0.896, with confidence intervals almost entirely overlapping. An early read at n=42 showed a much
-larger gap (0.991 vs 0.829) that did not survive a fivefold increase in sample size.
+Measured on 281 RSNA studies, scoring canal AP diameter at L4/L5 against the radiologist's stenosis grade:
+clean numbering gave AUC 0.924, a called transitional level gave 0.896, confidence intervals almost
+entirely overlapping.
 
-So these flags are **not** a filter that improves discrimination, and should not be sold as one. A shifted
-level assignment still lands on an adjacent disc, whose pathology correlates with the intended one. What
-the flags are for is provenance and level *identity*: knowing that a row labelled "L4/L5" may actually be
-L3/L4 matters when results are aggregated per level across a cohort, or compared against a report that
-names levels. It does not much matter when the question is "is this particular disc narrow".
+These flags are therefore **not** a filter that improves discrimination. A shifted level assignment still
+lands on an adjacent disc, whose pathology correlates with the intended one. Their use is provenance and
+level *identity*: a row labelled "L4/L5" that is really L3/L4 matters when results are aggregated per level
+across a cohort, or checked against a report that names levels. It matters much less when the question is
+whether one particular disc is narrow.
 """
 
 from __future__ import annotations
