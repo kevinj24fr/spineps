@@ -287,8 +287,11 @@ def _warn_if_implausible(result: CanalMeasurement, log) -> None:
     message = (
         f"{len(offenders)} of {len(result.levels)} levels have an AP diameter outside the plausible "
         f"{lo:.0f}-{hi:.0f} mm range (median across levels {typical:.1f} mm; {', '.join(offenders[:6])}). "
-        "The usual cause is input geometry, not anatomy: check that the mask's affine really describes its "
-        "array axes, since an affine rebuilt from voxel spacing alone measures AP along the wrong axis."
+        "This is usually the input rather than the patient. Two common causes: a level lying at the edge of "
+        "the field of view, where the canal is only partly imaged; or an affine that does not describe its "
+        "array axes, which measures AP along the wrong axis (rebuilding one from voxel spacing alone does "
+        "exactly that). Check whether the flagged levels sit at the ends of the volume before suspecting "
+        "geometry."
     )
     result.warnings.append(message)
     log.print(message, Log_Type.WARNING)
