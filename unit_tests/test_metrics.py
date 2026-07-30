@@ -221,16 +221,23 @@ class Test_Numbering_Confidence(unittest.TestCase):
 
 
 class Test_Soft_Tissue(unittest.TestCase):
-    def _vibe(self, counts: dict[str, int]) -> NII:
-        """Builds a VIBE-like segmentation with an exact voxel count per named label."""
+    def _vibe(self, counts: dict[str, int], touch_lr_edge: bool = False) -> NII:
+        """Builds a VIBE-like segmentation with an exact voxel count per named label.
+
+        Labels are placed away from the left-right edges by default, because touching an edge means the
+        structure is only partly imaged and the code then suppresses laterality on purpose.
+        """
         arr = np.zeros(SHAPE, dtype=np.uint16)
-        flat = arr.reshape(-1)
+        lo, hi = (0, SHAPE[0]) if touch_lr_edge else (2, SHAPE[0] - 2)
+        interior = arr[lo:hi]
+        flat = interior.reshape(-1)
         cursor = 0
         for name, n in counts.items():
             value = int(Full_Body_Instance_Vibe[name].value)
             flat[cursor : cursor + n] = value
             cursor += n
-        return _nii(flat.reshape(SHAPE))
+        arr[lo:hi] = flat.reshape(interior.shape)
+        return _nii(arr)
 
     def test_paraspinal_volume_matches_voxel_count(self):
         voxel_volume = ZOOM[0] * ZOOM[1] * ZOOM[2]
@@ -346,3 +353,47 @@ class Test_Numbering_Flag_Calibration(unittest.TestCase):
         result = assess_numbering(self._verts(["L4", "L5", "S1"], touch_top=True))
         self.assertTrue(result.truncated_superior)
         self.assertFalse(result.truncated_inferior)
+
+
+class Test_Soft_Tissue_Slab_Truncation(unittest.TestCase):
+    """A sagittal stack cuts the paraspinal muscles off, so the volumes are slab fragments.
+
+    On a real lumbar study the left-right coverage was 61.6 mm and both autochthon labels reached an edge;
+    the resulting left/right ratio of 0.514 reflected the left muscle getting 6 sagittal slices and the
+    right getting 9, not the patient.
+    """
+
+    def _vibe(self, counts: dict[str, int], touch_lr_edge: bool) -> NII:
+        arr = np.zeros(SHAPE, dtype=np.uint16)
+        lo, hi = (0, SHAPE[0]) if touch_lr_edge else (2, SHAPE[0] - 2)
+        interior = arr[lo:hi]
+        flat = interior.reshape(-1)
+        cursor = 0
+        for name, n in counts.items():
+            flat[cursor : cursor + n] = int(Full_Body_Instance_Vibe[name].value)
+            cursor += n
+        arr[lo:hi] = flat.reshape(interior.shape)
+        return _nii(arr)
+
+    def test_edge_touching_labels_are_marked_truncated(self):
+        seg = self._vibe({"autochthon_left": 40, "autochthon_right": 40}, touch_lr_edge=True)
+        result = measure_soft_tissue(seg)
+        self.assertIn("autochthon_left", result.truncated_labels)
+
+    def test_laterality_is_suppressed_when_truncated(self):
+        """Reporting a ratio computed from partly-imaged muscle would be worse than reporting nothing."""
+        truncated = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 80}, True))
+        intact = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 80}, False))
+        self.assertNotIn("paraspinal_muscle", truncated.laterality)
+        self.assertIn("paraspinal_muscle", intact.laterality)
+        self.assertAlmostEqual(intact.laterality["paraspinal_muscle"], 0.5, places=6)
+
+    def test_truncation_warning_explains_the_consequence(self):
+        result = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 40}, True))
+        joined = " ".join(result.warnings)
+        self.assertIn("slab", joined)
+        self.assertIn("not comparable between", joined)
+
+    def test_lr_coverage_is_reported(self):
+        result = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 40}, False))
+        self.assertAlmostEqual(result.lr_coverage_mm, SHAPE[0] * ZOOM[0], places=6)
