@@ -473,3 +473,80 @@ class Test_Canal_Robust_Narrow_Statistic(unittest.TestCase):
         rows = measure_canal(semantic, verts, min_ap_extent_mm=0.0).as_rows()
         narrows = [r["narrow_ap_diameter_mm"] for r in rows]
         self.assertEqual(narrows, sorted(narrows))
+
+
+class Test_Canal_Plausibility_Guard(unittest.TestCase):
+    """Wrong input geometry produces confident nonsense, so the numbers must be sanity-checked.
+
+    Rebuilding an affine from voxel spacing alone silently relabels the axes; on a sagittal study that
+    measures anterior-posterior along the left-right axis. That mistake produced 90 mm "AP diameters" from
+    real reference masks and nothing in the code objected.
+    """
+
+    def test_plausible_input_raises_no_geometry_warning(self):
+        semantic, verts, _ = _canal_phantom(ap_voxels=8)
+        result = measure_canal(semantic, verts)
+        self.assertFalse([w for w in result.warnings if "plausible" in w])
+
+    def test_implausibly_wide_canal_is_flagged(self):
+        """A canal wider than any real one must be called out, not silently reported."""
+        arr = np.zeros(SHAPE, dtype=np.uint16)
+        arr[4:6, 2:38, :] = Location.Spinal_Canal.value  # 36 voxels at 0.5 mm = 18 mm... widen via spacing
+        verts = np.zeros(SHAPE, dtype=np.uint16)
+        verts[2:8, 5:18, 10:40] = v_name2idx["L4"]
+        huge = (1.0, 3.0, 2.0)  # 36 voxels * 3.0 mm = 108 mm AP
+        result = measure_canal(_nii(arr, huge), _nii(verts, huge))
+        flagged = [w for w in result.warnings if "plausible" in w]
+        self.assertTrue(flagged, result.warnings)
+        self.assertIn("affine", flagged[0])
+
+    def test_levels_are_still_reported_when_flagged(self):
+        """The guard warns; it must not silently drop data."""
+        arr = np.zeros(SHAPE, dtype=np.uint16)
+        arr[4:6, 2:38, :] = Location.Spinal_Canal.value
+        verts = np.zeros(SHAPE, dtype=np.uint16)
+        verts[2:8, 5:18, 10:40] = v_name2idx["L4"]
+        huge = (1.0, 3.0, 2.0)
+        result = measure_canal(_nii(arr, huge), _nii(verts, huge))
+        self.assertTrue(result.levels)
+
+
+class Test_Normative_Reference(unittest.TestCase):
+    """The bundled reference exists so a level is compared to its own distribution, not a fixed number."""
+
+    def test_reference_loads_and_covers_the_lumbar_levels(self):
+        from spineps.metrics import load_reference
+
+        table = load_reference()
+        self.assertTrue(table)
+        vertebrae = [k for k in table if k[1] == "vertebra"]
+        self.assertGreaterEqual(len(vertebrae), 5)
+        for key, row in table.items():
+            self.assertGreater(row.n, 0, key)
+            ordered = [row.values[p] for p in sorted(row.values)]
+            self.assertEqual(ordered, sorted(ordered), f"percentiles not monotone at {key}")
+
+    def test_percentile_rank_places_values_in_the_right_band(self):
+        from spineps.metrics import load_reference, percentile_rank
+
+        row = load_reference()[(1, "vertebra")]
+        self.assertEqual(percentile_rank(row.values[5] - 1.0, 1), "<p5")
+        self.assertEqual(percentile_rank(row.values[95] + 1.0, 1), ">p95")
+        midband = (row.values[25] + row.values[50]) / 2
+        self.assertEqual(percentile_rank(midband, 1), "p25-p50")
+
+    def test_unknown_level_returns_none_rather_than_guessing(self):
+        from spineps.metrics import is_unusually_narrow, percentile_rank
+
+        self.assertIsNone(percentile_rank(10.0, 99))
+        self.assertIsNone(is_unusually_narrow(10.0, 99))
+
+    def test_the_same_number_ranks_differently_at_different_levels(self):
+        """This is the whole point: an absolute threshold cannot be level-agnostic."""
+        from spineps.metrics import load_reference, percentile_rank
+
+        table = load_reference()
+        caudal, cranial = table[(1, "vertebra")], table[(5, "vertebra")]
+        self.assertLess(caudal.values[50], cranial.values[50], "reference should widen cranially")
+        probe = caudal.values[50]  # unremarkable at the caudal level
+        self.assertNotEqual(percentile_rank(probe, 1), percentile_rank(probe, 5))
