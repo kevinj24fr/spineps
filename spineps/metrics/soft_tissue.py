@@ -74,11 +74,16 @@ class SoftTissueVolumes:
     """Soft-tissue volumes read out of a VIBE whole-body segmentation.
 
     Attributes:
-        group_volumes_mm3 (dict[str, float]): Volume per compartment in SOFT_TISSUE_GROUPS.
+        group_volumes_mm3 (dict[str, float]): Volume per compartment in SOFT_TISSUE_GROUPS. On a sagittal
+            acquisition these are the volume *inside the imaged slab*, not the whole muscle.
         per_label_volumes_mm3 (dict[str, float]): Volume for each individual VIBE label found.
         laterality (dict[str, float]): For paired compartments, the left/right volume ratio; 1.0 means
-            symmetric. Absent for compartments with no pairing or no volume.
+            symmetric. Omitted for any pair that is cut off at a slab edge, because the ratio would then
+            measure where the slab sits rather than the patient.
         voxel_size_mm (tuple[float, float, float]): Voxel spacing of the segmentation measured.
+        truncated_labels (list[str]): Labels reaching the left or right edge of the volume, and therefore
+            only partially imaged.
+        lr_coverage_mm (float): Total left-right extent of the imaged volume.
         warnings (list[str]): Reasons to distrust the numbers.
     """
 
@@ -86,6 +91,8 @@ class SoftTissueVolumes:
     per_label_volumes_mm3: dict[str, float] = field(default_factory=dict)
     laterality: dict[str, float] = field(default_factory=dict)
     voxel_size_mm: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    truncated_labels: list[str] = field(default_factory=list)
+    lr_coverage_mm: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
     def as_row(self) -> dict:
@@ -137,11 +144,16 @@ def measure_soft_tissue(vibe_seg: Union[NII, str, Path]) -> SoftTissueVolumes:
         seg = vibe_seg
 
     name_to_value = _vibe_label_values()
+    # Reorient so axis 0 is unambiguously left-right; truncation of a paired muscle happens along it.
+    seg = seg.copy().reorient_(("R", "A", "S"))
     arr = seg.get_seg_array().astype(np.int32)
     spacing = tuple(float(z) for z in seg.zoom)
     voxel_volume = spacing[0] * spacing[1] * spacing[2]
 
-    result = SoftTissueVolumes(voxel_size_mm=spacing)  # type: ignore[arg-type]
+    result = SoftTissueVolumes(  # type: ignore[arg-type]
+        voxel_size_mm=spacing,
+        lr_coverage_mm=arr.shape[0] * spacing[0],
+    )
 
     present = {int(v) for v in np.unique(arr) if v != 0}
 
@@ -166,6 +178,15 @@ def measure_soft_tissue(vibe_seg: Union[NII, str, Path]) -> SoftTissueVolumes:
             f"whole-body segmentation (found labels {sorted(present)[:12]}...)"
         )
 
+    # Which labels run into the left or right edge of the imaged volume, and so are only partly captured.
+    for label_name, value in name_to_value.items():
+        mask = arr == value
+        if not mask.any():
+            continue
+        occupied = np.flatnonzero(mask.any(axis=(1, 2)))
+        if occupied[0] == 0 or occupied[-1] == arr.shape[0] - 1:
+            result.truncated_labels.append(label_name)
+
     for group, label_names in SOFT_TISSUE_GROUPS.items():
         total = 0.0
         for label_name in label_names:
@@ -180,16 +201,31 @@ def measure_soft_tissue(vibe_seg: Union[NII, str, Path]) -> SoftTissueVolumes:
         if total:
             result.group_volumes_mm3[group] = total
 
-        # Left/right ratio, where the compartment is paired and both sides were found.
+        # Left/right ratio, but only when neither side is cut off by the edge of the imaged volume. On a
+        # sagittal stack the muscles run out of the slab, so the ratio would report slab centring rather
+        # than anatomy: a real lumbar study gave 0.514 purely because the left muscle got 6 sagittal slices
+        # and the right got 9.
         left = sum(v for k, v in result.per_label_volumes_mm3.items() if k in label_names and k.endswith("_left"))
         right = sum(v for k, v in result.per_label_volumes_mm3.items() if k in label_names and k.endswith("_right"))
-        if left and right:
+        pair_truncated = any(name in result.truncated_labels for name in label_names)
+        if left and right and not pair_truncated:
             result.laterality[group] = left / right
 
     result.warnings.append(
         "the VIBE model is trained for VIBE/Dixon acquisitions and is run here only to place a crop box; "
         "these volumes are unvalidated on sagittal T2w and must be checked before being used as measurements"
     )
+    truncated_soft_tissue = [
+        name for names in SOFT_TISSUE_GROUPS.values() for name in names if name in result.truncated_labels
+    ]
+    if truncated_soft_tissue:
+        result.warnings.append(
+            f"left-right coverage is only {result.lr_coverage_mm:.0f} mm and these labels reach a slab edge: "
+            f"{', '.join(sorted(truncated_soft_tissue))}. The volumes are therefore the part of each "
+            "structure inside the imaged slab, not the whole structure, so they are not comparable between "
+            "subjects unless the slab is identical. Laterality ratios are omitted for truncated pairs "
+            "because they would measure slab centring rather than the patient."
+        )
     if spacing[0] > 2.0 or spacing[2] > 2.0:
         result.warnings.append(
             f"voxel spacing {spacing} is coarse for muscle quantification; the paraspinal compartment "
