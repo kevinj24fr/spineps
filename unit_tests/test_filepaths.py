@@ -1,4 +1,4 @@
-# Call 'python -m unittest' on this folder  # noqa: INP001
+# Call 'python -m unittest' on this folder
 # coverage run -m unittest
 # coverage report
 # coverage html
@@ -33,10 +33,10 @@ class Test_filepaths(unittest.TestCase):
     def test_search_path_simple(self):
         package_path = Path(spineps.__file__).parent
         print(package_path)
-        predictor_search = search_path(package_path, query="**/predictor.py")
-        print(predictor_search)
-        self.assertTrue(len(predictor_search) == 1)
-        self.assertEqual(predictor_search[0], package_path.joinpath("utils", "predictor.py"))
+        search_result = search_path(package_path, query="**/proc_functions.py")
+        print(search_result)
+        self.assertTrue(len(search_result) == 1)
+        self.assertEqual(search_result[0], package_path.joinpath("utils", "proc_functions.py"))
 
     def test_search_path_multi(self):
         package_path = Path(spineps.__file__).parent
