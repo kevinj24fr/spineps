@@ -245,15 +245,6 @@ class Test_Soft_Tissue(unittest.TestCase):
         result = measure_soft_tissue(seg)
         self.assertAlmostEqual(result.group_volumes_mm3["paraspinal_muscle"], 250 * voxel_volume, places=6)
 
-    def test_laterality_ratio(self):
-        seg = self._vibe({"autochthon_left": 100, "autochthon_right": 200})
-        result = measure_soft_tissue(seg)
-        self.assertAlmostEqual(result.laterality["paraspinal_muscle"], 0.5, places=6)
-
-    def test_symmetric_gives_unity(self):
-        seg = self._vibe({"autochthon_left": 120, "autochthon_right": 120})
-        self.assertAlmostEqual(measure_soft_tissue(seg).laterality["paraspinal_muscle"], 1.0, places=6)
-
     def test_fat_compartments_are_separated(self):
         seg = self._vibe({"autochthon_left": 10, "subcutaneous_fat": 40, "inner_fat": 20})
         result = measure_soft_tissue(seg)
@@ -380,20 +371,54 @@ class Test_Soft_Tissue_Slab_Truncation(unittest.TestCase):
         result = measure_soft_tissue(seg)
         self.assertIn("autochthon_left", result.truncated_labels)
 
-    def test_laterality_is_suppressed_when_truncated(self):
-        """Reporting a ratio computed from partly-imaged muscle would be worse than reporting nothing."""
-        truncated = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 80}, True))
-        intact = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 80}, False))
-        self.assertNotIn("paraspinal_muscle", truncated.laterality)
-        self.assertIn("paraspinal_muscle", intact.laterality)
-        self.assertAlmostEqual(intact.laterality["paraspinal_muscle"], 0.5, places=6)
-
     def test_truncation_warning_explains_the_consequence(self):
         result = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 40}, True))
         joined = " ".join(result.warnings)
         self.assertIn("slab", joined)
-        self.assertIn("not comparable between", joined)
+        self.assertIn("do NOT compare them between subjects", joined)
 
     def test_lr_coverage_is_reported(self):
         result = measure_soft_tissue(self._vibe({"autochthon_left": 40, "autochthon_right": 40}, False))
         self.assertAlmostEqual(result.lr_coverage_mm, SHAPE[0] * ZOOM[0], places=6)
+
+
+class Test_Soft_Tissue_Symmetric_Laterality(unittest.TestCase):
+    """Laterality must be valid on a truncated slab, which is what real sagittal imaging gives you.
+
+    Comparing whole structures reports slab centring, not the patient. Comparing mirror-symmetric windows
+    about the midline reports the patient, and works whether or not the structures run off the edge.
+    """
+
+    def _vibe(self, left_slices: tuple[int, int], right_slices: tuple[int, int], per_slice: int = 20) -> NII:
+        """Places a midline anchor at LR 5 plus muscle blocks at chosen left/right slice ranges."""
+        arr = np.zeros(SHAPE, dtype=np.uint16)
+        arr[4:7, 18:22, 20:24] = int(Full_Body_Instance_Vibe.spinal_channel.value)  # centroid LR = 5
+        for (lo, hi), name in ((left_slices, "autochthon_left"), (right_slices, "autochthon_right")):
+            value = int(Full_Body_Instance_Vibe[name].value)
+            for lr in range(lo, hi + 1):
+                flat = arr[lr, 25:35].reshape(-1)
+                flat[:per_slice] = value
+                arr[lr, 25:35] = flat.reshape(arr[lr, 25:35].shape)
+        return _nii(arr)
+
+    def test_midline_is_found_from_the_anchor(self):
+        result = measure_soft_tissue(self._vibe((1, 4), (6, 9)))
+        self.assertEqual(result.midline_lr_index, 5)
+        self.assertGreater(result.symmetric_half_width_mm, 0)
+
+    def test_symmetric_anatomy_gives_unity(self):
+        result = measure_soft_tissue(self._vibe((1, 4), (6, 9)))
+        self.assertAlmostEqual(result.laterality["paraspinal_muscle"], 1.0, places=6)
+
+    def test_asymmetric_anatomy_is_detected(self):
+        """Half the slices on the left must read as a ratio of 0.5, not be suppressed."""
+        result = measure_soft_tissue(self._vibe((3, 4), (6, 9)))
+        self.assertAlmostEqual(result.laterality["paraspinal_muscle"], 0.5, places=6)
+
+    def test_laterality_survives_edge_truncation(self):
+        """The real case: muscle running off both slab edges must still yield a usable ratio."""
+        result = measure_soft_tissue(self._vibe((0, 4), (6, 9)))
+        self.assertIn("autochthon_left", result.truncated_labels)
+        # Slice 0 lies outside the symmetric window (midline 5 -> window 1..9), so it is excluded and the
+        # comparison stays fair rather than being inflated by the truncated side.
+        self.assertAlmostEqual(result.laterality["paraspinal_muscle"], 1.0, places=6)
