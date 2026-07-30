@@ -529,11 +529,12 @@ class Test_Normative_Reference(unittest.TestCase):
     def test_percentile_rank_places_values_in_the_right_band(self):
         from spineps.metrics import load_reference, percentile_rank
 
+        # These probes are on the reference scale, so no SPINEPS offset should be applied.
         row = load_reference()[(1, "vertebra")]
-        self.assertEqual(percentile_rank(row.values[5] - 1.0, 1), "<p5")
-        self.assertEqual(percentile_rank(row.values[95] + 1.0, 1), ">p95")
+        self.assertEqual(percentile_rank(row.values[5] - 1.0, 1, source="reference"), "<p5")
+        self.assertEqual(percentile_rank(row.values[95] + 1.0, 1, source="reference"), ">p95")
         midband = (row.values[25] + row.values[50]) / 2
-        self.assertEqual(percentile_rank(midband, 1), "p25-p50")
+        self.assertEqual(percentile_rank(midband, 1, source="reference"), "p25-p50")
 
     def test_unknown_level_returns_none_rather_than_guessing(self):
         from spineps.metrics import is_unusually_narrow, percentile_rank
@@ -549,4 +550,40 @@ class Test_Normative_Reference(unittest.TestCase):
         caudal, cranial = table[(1, "vertebra")], table[(5, "vertebra")]
         self.assertLess(caudal.values[50], cranial.values[50], "reference should widen cranially")
         probe = caudal.values[50]  # unremarkable at the caudal level
-        self.assertNotEqual(percentile_rank(probe, 1), percentile_rank(probe, 5))
+        self.assertNotEqual(percentile_rank(probe, 1, source="reference"), percentile_rank(probe, 5, source="reference"))
+
+
+class Test_Normative_Calibration(unittest.TestCase):
+    """SPINEPS' canal is ~1.2 mm wider than the human annotations the reference was built from.
+
+    Comparing raw SPINEPS output against a human-derived distribution biases towards missing narrowing, so
+    the correction has to be applied by default rather than left to the caller to remember.
+    """
+
+    def test_calibrate_shifts_spineps_and_leaves_reference_alone(self):
+        from spineps.metrics import SPINEPS_CANAL_OFFSET_MM, calibrate
+
+        self.assertAlmostEqual(calibrate(12.0, "reference"), 12.0)
+        self.assertAlmostEqual(calibrate(12.0, "spineps"), 12.0 - SPINEPS_CANAL_OFFSET_MM)
+
+    def test_unknown_source_raises(self):
+        from spineps.metrics import calibrate
+
+        with self.assertRaises(ValueError):
+            calibrate(12.0, "guess")
+
+    def test_default_source_is_spineps(self):
+        """The package produces SPINEPS measurements, so that must be the default."""
+        from spineps.metrics import percentile_rank
+
+        probe = 12.0
+        self.assertEqual(percentile_rank(probe, 1), percentile_rank(probe, 1, source="spineps"))
+
+    def test_correction_can_change_the_verdict(self):
+        from spineps.metrics import SPINEPS_CANAL_OFFSET_MM, is_unusually_narrow, load_reference
+
+        p5 = load_reference()[(1, "vertebra")].values[5]
+        # A SPINEPS reading just above p5 is actually below it once the offset is removed.
+        probe = p5 + SPINEPS_CANAL_OFFSET_MM * 0.5
+        self.assertFalse(is_unusually_narrow(probe, 1, source="reference"))
+        self.assertTrue(is_unusually_narrow(probe, 1, source="spineps"))
