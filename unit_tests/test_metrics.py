@@ -252,9 +252,7 @@ class Test_Soft_Tissue(unittest.TestCase):
         result = measure_soft_tissue(seg)
         self.assertIn("subcutaneous_fat", result.group_volumes_mm3)
         self.assertIn("inner_fat", result.group_volumes_mm3)
-        self.assertNotAlmostEqual(
-            result.group_volumes_mm3["subcutaneous_fat"], result.group_volumes_mm3["inner_fat"]
-        )
+        self.assertNotAlmostEqual(result.group_volumes_mm3["subcutaneous_fat"], result.group_volumes_mm3["inner_fat"])
 
     def test_validation_warning_is_always_present(self):
         """The numbers are unvalidated on T2w; that caveat must travel with them."""
@@ -312,3 +310,39 @@ class Test_Canal_AP_Extent_Floor(unittest.TestCase):
         """A voxel-count floor would silently change meaning with resolution; this one is in mm."""
         self.assertIsInstance(DEFAULT_MIN_AP_EXTENT_MM, float)
         self.assertGreater(DEFAULT_MIN_AP_EXTENT_MM, 0.0)
+
+
+class Test_Numbering_Flag_Calibration(unittest.TestCase):
+    """A flag that fires on nearly every scan carries no information.
+
+    On a real 18-station cohort the segmentation reached a volume edge 16 times, because the spinal column
+    normally continues past the field of view. Truncation is therefore recorded but must not by itself
+    condemn the numbering; what matters is whether the count is anchored by a visible sacrum.
+    """
+
+    def _verts(self, names: list[str], touch_top: bool = False, touch_bottom: bool = False) -> NII:
+        arr = np.zeros(SHAPE, dtype=np.uint16)
+        span = 4
+        start = 0 if touch_bottom else 3
+        for i, name in enumerate(names):
+            lo = start + i * (span + 1)
+            arr[2:8, 5:18, lo : lo + span] = v_name2idx[name]
+        if touch_top:
+            arr[2:8, 5:18, SHAPE[2] - 1] = v_name2idx[names[-1]]
+        return _nii(arr)
+
+    def test_truncation_with_a_visible_sacrum_stays_trustworthy(self):
+        result = assess_numbering(self._verts(["L4", "L5", "S1"], touch_top=True, touch_bottom=True))
+        self.assertTrue(result.truncated_superior)
+        self.assertTrue(result.truncated_inferior)
+        self.assertTrue(result.trustworthy, result.reasons)
+
+    def test_truncation_without_a_sacrum_is_not_trustworthy(self):
+        result = assess_numbering(self._verts(["L3", "L4", "L5"], touch_top=True))
+        self.assertFalse(result.trustworthy)
+        self.assertTrue(any("anchor" in r for r in result.reasons))
+
+    def test_truncation_is_still_reported_for_context(self):
+        result = assess_numbering(self._verts(["L4", "L5", "S1"], touch_top=True))
+        self.assertTrue(result.truncated_superior)
+        self.assertFalse(result.truncated_inferior)
