@@ -36,12 +36,6 @@ This is a segmentation pipeline to automatically, and robustly, segment the whol
 
 Everything else — models, labels, pipeline structure, CLI semantics — is upstream's and unchanged.
 
-## NOW SUPPORTS BOTH CT AND T2W!
-There is a new release that finally supports both CT and T2W with completely independent, modality specific models. We are already working on completely modality/sequence robust version that works on everything. Stay tuned for that.
-
-
-![pipeline_process](spineps/example/figures/pipeline_processflow.png?raw=true)
-
 ## Documentation
 
 📖 **Online documentation: [spineps.readthedocs.io](https://spineps.readthedocs.io)**
@@ -80,43 +74,7 @@ Menze, Daniel Rueckert, Jan Stefan Kirschke. Denoising diffusion-based MRI to CT
 translation enables automated spinal segmentation. Eur Radiol Exp 7, 70 (2023).
 https://doi.org/10.1186/s41747-023-00385-2
 ```
-SPINEPS:
 
-Paper link: <a href="https://link.springer.com/article/10.1007/s00330-024-11155-y#citeas">https://link.springer.com/article/10.1007/s00330-024-11155-y#citeas</a>
-
-Source of the T2w/T1w Segmentation:
-
-Open Access link: <a href="https://doi.org/10.1186/s41747-023-00385-2">https://doi.org/10.1186/s41747-023-00385-2</a>
-
-BibTeX citation:
-```
-@article{moller_spinepsautomatic_2024,
-	title = {{SPINEPS}—automatic whole spine segmentation of T2-weighted {MR} images using a two-phase approach to multi-class semantic and instance segmentation},
-	issn = {1432-1084},
-	url = {https://doi.org/10.1007/s00330-024-11155-y},
-	doi = {10.1007/s00330-024-11155-y},
-	abstract = {Introducing {SPINEPS}, a deep learning method for semantic and instance segmentation of 14 spinal structures (ten vertebra substructures, intervertebral discs, spinal cord, spinal canal, and sacrum) in whole-body sagittal T2-weighted turbo spin echo images.},
-	journaltitle = {European Radiology},
-	shortjournal = {Eur Radiol},
-	author = {Möller, Hendrik and Graf, Robert and Schmitt, Joachim and Keinert, Benjamin and Schön, Hanna and Atad, Matan and Sekuboyina, Anjany and Streckenbach, Felix and Kofler, Florian and Kroencke, Thomas and Bette, Stefanie and Willich, Stefan N. and Keil, Thomas and Niendorf, Thoralf and Pischon, Tobias and Endemann, Beate and Menze, Bjoern and Rueckert, Daniel and Kirschke, Jan S.},
-	urldate = {2024-11-14},
-	date = {2024-10-29},
-	langid = {english},
-	keywords = {Deep learning, Intervertebral disc, Magnetic resonance imaging, Spine, Vertebral body},
-}
-
-
-@article{graf2023denoising,
-  title={Denoising diffusion-based MRI to CT image translation enables automated spinal segmentation},
-  author={Graf, Robert and Schmitt, Joachim and Schlaeger, Sarah and M{\"o}ller, Hendrik Kristian and Sideri-Lampretsa, Vasiliki and Sekuboyina, Anjany and Krieg, Sandro Manuel and Wiestler, Benedikt and Menze, Bjoern and Rueckert, Daniel and others},
-  journal={European Radiology Experimental},
-  volume={7},
-  number={1},
-  pages={70},
-  year={2023},
-  publisher={Springer}
-}
-```
 ## Installation (macOS / Apple Silicon)
 
 > Fork-specific. Upstream does not run without CUDA — see [Changes in this fork](#changes-in-this-fork).
@@ -366,8 +324,6 @@ The pipeline segments in multiple steps:
 5. From the two segmentations, calculates centroids for each vertebrae center point, endplate, and IVD and saves that into a .json
 6. From the centroid and the segmentations, makes a snapshot showcasing the result as a .png
 
-![example_semantic](spineps/example/figures/example_semantic.png?raw=true)
-
 ### Labels:
 
 In the subregion segmentation:
@@ -416,22 +372,6 @@ If you want to call the code snippets yourself, start by initializing your model
 Depending on whether you want to process a single sample or a whole dataset, go into `seg_run.py` and run either `process_img_nii()` or `process_dataset()`.
 
 If you want to perform even more detailed changes or code injections, see `process_img_nii()` as inspiration on how the underlaying functions work and behave. Treat with care!
-
-
-## Authorship
-
-This pipeline was created by Hendrik Möller, M.Sc. (he/him)<br>
-PhD Researcher at Department for Interventional and Diagnostic Neuroradiology
-
-Developed within an ERC Grant at<br>
-University Hospital rechts der Isar at Technical University of Munich<br>
-Ismaninger Street 22, 81675 Munich
-
-https://deep-spine.de/<br>
-https://aim-lab.io/author/hendrik-moller/
-
-
-
 
 ## License
 
